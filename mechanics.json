@@ -1,0 +1,310 @@
+{
+ "version": 1,
+ "values": [
+  {
+   "name": "dex target",
+   "group": "meta",
+   "value": "official-base.apk sha256 b545018e8cba3ec1d37920ec088813f4793f6e1be0ecdb094f3b65cef6740a8f",
+   "source": "core_target_open t_b545018e8cba"
+  },
+  {
+   "name": "gateway port",
+   "group": "transport",
+   "value": 9119,
+   "unit": "tcp",
+   "source": "CONTRACT.md + DEX string 'https://hermes.local:9119'"
+  },
+  {
+   "name": "session cookie",
+   "group": "auth",
+   "value": "hermes_session_rt",
+   "source": "CONTRACT.md (live capture ev_0e07a669); cookie jar in Lgu6;"
+  },
+  {
+   "name": "login endpoint",
+   "group": "auth",
+   "value": "POST /auth/password-login",
+   "source": "DEX Lzaf;->e (decompiled)",
+   "evidence": "Lzaf;->e"
+  },
+  {
+   "name": "login request",
+   "group": "auth",
+   "value": "JSON {username,password}, Content-Type application/json, NO Authorization header",
+   "source": "DEX Lzaf;->e bytecode (no Basic header instruction)"
+  },
+  {
+   "name": "ws ticket endpoint",
+   "group": "auth",
+   "value": "GET /api/auth/ws-ticket",
+   "source": "DEX Lpx3;->d (decompiled)"
+  },
+  {
+   "name": "ws ticket response key",
+   "group": "auth",
+   "value": "ticket",
+   "source": "DEX Lpx3;->d: firstString key is exactly 'ticket'"
+  },
+  {
+   "name": "ws ticket errors",
+   "group": "auth",
+   "value": "401/403 -> 'WebSocket ticket request returned HTTP <n>'; other -> 'The agent is asleep.'",
+   "source": "DEX Lpx3;->d branches"
+  },
+  {
+   "name": "ws connect",
+   "group": "transport",
+   "value": "GET /api/ws?ticket=<URLEncoder UTF-8>",
+   "source": "CONTRACT.md + DEX Lco6;->W"
+  },
+  {
+   "name": "ws subprotocol base",
+   "group": "transport",
+   "value": "hermes-gateway-v1",
+   "source": "CONTRACT.md + DEX string"
+  },
+  {
+   "name": "ws subprotocol ticket prefix",
+   "group": "transport",
+   "value": "hermes-gateway-ticket.<ticket>",
+   "source": "DEX Lco6;->W @0x4b-0x53; sig IS the ticket"
+  },
+  {
+   "name": "heartbeat frame",
+   "group": "transport",
+   "value": "{jsonrpc, id:'heartbeat-<n>', method:gateway.ping|ping, params:{}}; id is string counter",
+   "source": "DEX Lco6;->B @00df-014d ('heartbeat-' @00fe, counter field I @00f7)"
+  },
+  {
+   "name": "heartbeat interval",
+   "group": "transport",
+   "value": 15000,
+   "unit": "ms",
+   "source": "DEX Lco6;->B delays Ldo6;->i @008c/0098; Ldo6;-><init> @005d const-wide/16 0x3a98 (caller Lfr6;->y @00c4)",
+   "evidence": "ev_de484bee80551f3ea4b32e1b2a10acbf33acc6203b580fe6eced15dee4ea2fc8"
+  },
+  {
+   "name": "ping method default",
+   "group": "transport",
+   "value": "gateway.ping",
+   "source": "DEX Lco6;-><init> @003d",
+   "evidence": "ev_0209ddda743214c96d79139c9ad2e10746e2d14f001fa2a2ead10de9d0ac7704"
+  },
+  {
+   "name": "heartbeat send rule",
+   "group": "transport",
+   "value": "ack-gated: ack flag F set on heartbeat JSON-RPC response (Lco6;->H @0072); tick with F set resets misses and skips send (B @00a9-00b7)",
+   "source": "DEX Lco6;->B @00a9-00b7"
+  },
+  {
+   "name": "heartbeat miss watchdog",
+   "group": "transport",
+   "value": 3,
+   "unit": "un-acked intervals (45 s)",
+   "source": "DEX Lco6;->B threshold max(1, Ldo6;->j/i)=45000/15000 @0077-007e; Len6;->invokeSuspend @0073-0084 throws 'No frame from Hermes for N heartbeat intervals' -> Lco6;->k reconnect"
+  },
+  {
+   "name": "RPC timeout",
+   "group": "transport",
+   "value": 10000,
+   "unit": "ms",
+   "source": "DEX Lco6;->w()J @0x4 min(0x2710, Ldo6;->f=15000); timeout arg of g(...) in J/L/O/R/V/q (q @00e3)"
+  },
+  {
+   "name": "ping negotiation",
+   "group": "transport",
+   "value": "gateway.ready payload flag true -> gateway.ping, false -> ping",
+   "source": "DEX Lco6;->y 'gateway.ping' @025c / 'ping' @025f, field H @0261; payload.session_authority @0044"
+  },
+  {
+   "name": "gateway.ready payload keys",
+   "group": "transport",
+   "value": "session_authority, replay_epoch",
+   "source": "DEX Lco6;->y @0x44, @0x70"
+  },
+  {
+   "name": "reconnect post-open wait",
+   "group": "transport",
+   "value": 1000,
+   "unit": "ms",
+   "source": "DEX Lco6;->q @0x58 const-wide/16 0x3e8",
+   "evidence": "ev_b248221a8691e8645e78f3d0a35d8226be3e00960df5f72b9393ed322069181b"
+  },
+  {
+   "name": "reconnect replay staleness",
+   "group": "transport",
+   "value": 90,
+   "unit": "s",
+   "source": "DEX Lco6;->q @0xa5 const-wide 0xd18c2e2800 ns"
+  },
+  {
+   "name": "reconnect replay method",
+   "group": "transport",
+   "value": "session.events.since{session_id, since=last_seq} per pending session, TreeMap order",
+   "source": "DEX Lco6;->q @0xb0-0xee"
+  },
+  {
+   "name": "reconnect backoff",
+   "group": "transport",
+   "value": "1s to 30s exponential",
+   "source": "clone policy; official cadence constant not located",
+   "estimated": true
+  },
+  {
+   "name": "prompt answer timeout",
+   "group": "transport",
+   "value": 10,
+   "unit": "min",
+   "source": "CONTRACT.md (observed)"
+  },
+  {
+   "name": "session idle presets",
+   "group": "sessions",
+   "value": "Immediately 0s / 1 min 60 / 5 min 300 / 15 min 900 / 1 hour 3600",
+   "unit": "s",
+   "source": "DEX La50;-><clinit> 0x3c,0x12c,0x384,0xe10",
+   "evidence": "ev_b698f29a48e1354a29b216f84838dc345da95295076393aba41016211abefb30"
+  },
+  {
+   "name": "sessions page size",
+   "group": "sessions",
+   "value": 100,
+   "unit": "rows",
+   "source": "CONTRACT.md limit=100, offset*=100"
+  },
+  {
+   "name": "sessions query vocabulary",
+   "group": "sessions",
+   "value": "limit, offset, min_messages, archived, order, profile",
+   "source": "DEX Lnb;->P decompiled query params"
+  },
+  {
+   "name": "sessions query phase1",
+   "group": "sessions",
+   "value": "archived=include&limit=100&offset=N&order=recent&profile=<p>",
+   "source": "CONTRACT.md (observed)"
+  },
+  {
+   "name": "active list method",
+   "group": "sessions",
+   "value": "session.active_list{profile}",
+   "source": "CONTRACT.md + DEX string"
+  },
+  {
+   "name": "session resume method",
+   "group": "sessions",
+   "value": "session.resume",
+   "source": "DEX Lco6;->R @0x62, Lk90;->i @0x7"
+  },
+  {
+   "name": "tree dirty event",
+   "group": "sessions",
+   "value": "sessions.changed",
+   "source": "CONTRACT.md + DEX string"
+  },
+  {
+   "name": "working indicators",
+   "group": "sessions",
+   "value": "message.start|tool.start -> working; message.complete -> idle",
+   "source": "CONTRACT.md (turn.* does not exist on the wire)"
+  },
+  {
+   "name": "id matching",
+   "group": "sessions",
+   "value": "exact equality only; per-session epoch map",
+   "source": "DEX Lco6;->Z + Llv7;->z (no prefix/suffix rule in binary)"
+  },
+  {
+   "name": "approval answer default",
+   "group": "server-requests",
+   "value": "deny",
+   "source": "choice vocabulary CONTRACT.md; UI labels 'Allow Once'/'Always Allow'/'Allow for Session' in DEX; deny default is clone policy"
+  },
+  {
+   "name": "session create params",
+   "group": "sessions",
+   "value": "profile, source=gui, close_on_disconnect, hidden, follow_profile_config",
+   "source": "CONTRACT.md (observed C2S)"
+  },
+  {
+   "name": "background color",
+   "group": "ui",
+   "value": "#000022",
+   "source": "shots-tour-2026-11-22 pixel sampling; not a DEX const-wide/32 (census over all 3 dexes)"
+  },
+  {
+   "name": "surface color",
+   "group": "ui",
+   "value": "#0C1A3C",
+   "source": "shots-tour-2026-11-22 pixel sampling"
+  },
+  {
+   "name": "row highlight color",
+   "group": "ui",
+   "value": "#1D2761",
+   "source": "shots-tour-2026-11-22 pixel sampling"
+  },
+  {
+   "name": "accent purple",
+   "group": "ui",
+   "value": "#8B5CF6",
+   "source": "shots-tour-2026-11-22 pixel sampling"
+  },
+  {
+   "name": "accent green",
+   "group": "ui",
+   "value": "#66DD4B",
+   "source": "shots-tour-2026-11-22 pixel sampling"
+  },
+  {
+   "name": "accent teal",
+   "group": "ui",
+   "value": "#4BDDC7",
+   "source": "shots-tour-2026-11-22 pixel sampling"
+  },
+  {
+   "name": "arsc window_background",
+   "group": "ui",
+   "value": "light #faf6ee / night #1c1c1e",
+   "source": "resources.arsc (splash/widget palette only)"
+  },
+  {
+   "name": "working blue",
+   "group": "ui",
+   "value": "#4D8DFF",
+   "source": "01-launch.png Working label; exact hex estimated",
+   "estimated": true
+  },
+  {
+   "name": "search placeholder",
+   "group": "ui",
+   "value": "Search agents and sessions",
+   "source": "DEX string pool Ljf9;->c"
+  },
+  {
+   "name": "load earlier label",
+   "group": "ui",
+   "value": "Load earlier messages",
+   "source": "resources.arsc 0x7f12003a"
+  },
+  {
+   "name": "more sessions label",
+   "group": "ui",
+   "value": "%d more session(s)",
+   "source": "gap report + 01-launch.png; built in Compose, not a const-string"
+  },
+  {
+   "name": "login error copy",
+   "group": "ui",
+   "value": "Hermes did not accept that username and password.",
+   "source": "DEX string pool"
+  },
+  {
+   "name": "profile switch toasts",
+   "group": "ui",
+   "value": "You're on <name> now / Wait for the last change to finish. / Added from Hermes Cloud",
+   "source": "DEX Lw1b;->invoke @0x34/@0x5a/@0x02",
+   "evidence": "ev_01b79789519dbb36137db2b4ac3d18f7f01d74c09558b7d21fff7e04e3c55417"
+  }
+ ]
+}
