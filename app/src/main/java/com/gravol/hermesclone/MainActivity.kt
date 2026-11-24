@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
                         Screen.CHAT ->
                             ChatScreen(vm = vm, onBack = { /* state cleared by vm.closeChat */ })
                         Screen.SETTINGS ->
-                            SettingsScreen(vm = vm, onBack = { showSettings = false })
+                            SettingsScreen(vm, onBack = { showSettings = false }, onOpenGateways = { showSwitcher = true })
                         Screen.GATEWAY ->
                             GatewaySwitcherScreen(
                                 vm = vm,

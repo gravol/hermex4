@@ -103,6 +103,7 @@ import com.gravol.hermesclone.util.relTime
 fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> Unit) {
     val st by vm.state.collectAsStateWithLifecycle()
     var searchOpen by remember { mutableStateOf(false) }
+    var composeSheet by remember { mutableStateOf(false) }
     val pts = rememberPullToRefreshState()
 
     val query = st.query.trim().lowercase()
@@ -128,8 +129,8 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    CircleIconButton(onClick = onOpenGateways) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "gateways",
+                    CircleIconButton(onClick = onSettings) {
+                        Icon(Icons.Outlined.Settings, contentDescription = "settings",
                             tint = HmTextPrimary, modifier = Modifier.size(20.dp))
                     }
                     Spacer(Modifier.weight(1f))
@@ -161,10 +162,7 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = {
-                    val p = st.selectedProfile ?: st.profiles.firstOrNull()?.name
-                    if (p != null) vm.newSession(p)
-                },
+                onClick = { composeSheet = true },
                 containerColor = HmSurface,
                 contentColor = HmTextPrimary,
                 shape = CircleShape,
@@ -272,6 +270,14 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                         }
                     }
                 }
+            }
+            if (composeSheet) {
+                ComposeSheet(
+                    profiles = st.profiles.map { it.name },
+                    avatars = st.avatars,
+                    onPick = { p -> composeSheet = false; vm.newSession(p) },
+                    onDismiss = { composeSheet = false },
+                )
             }
             if (searchOpen) {
                 SearchPill(
@@ -568,6 +574,50 @@ private fun FilterMenu(expanded: Boolean, onDismiss: () -> Unit) {
         FilterItem(Icons.Outlined.PeopleOutline, "Agents", "All")
         FilterItem(Icons.Outlined.FolderOpen, "Project", "All projects")
         FilterItem(Icons.Outlined.Layers, "Include", "Group chats")
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun ComposeSheet(
+    profiles: List<String>,
+    avatars: Map<String, androidx.compose.ui.graphics.ImageBitmap?>,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = HmBackground,
+    ) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Start a new session", color = HmTextPrimary, fontSize = 19.sp,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Box(
+                    modifier = Modifier.size(44.dp).clip(CircleShape).background(HmSurface),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.PeopleOutline, contentDescription = null,
+                        tint = HmTextPrimary, modifier = Modifier.size(20.dp))
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            profiles.forEach { p ->
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onPick(p) }
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AgentAvatar(name = p, bitmap = avatars[p])
+                    Spacer(Modifier.width(16.dp))
+                    Text(p, color = HmTextPrimary, fontSize = 16.sp)
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(HmBorder.copy(alpha = 0.5f)))
+            }
+            Spacer(Modifier.height(16.dp))
+        }
     }
 }
 
