@@ -14,6 +14,27 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ViewAgenda
+import androidx.compose.material.icons.outlined.Sort
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.ScreenRotationAlt
+import androidx.compose.material.icons.outlined.PeopleOutline
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,6 +64,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -99,7 +121,7 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
     Scaffold(
         containerColor = HmBackground,
         topBar = {
-            Column {
+            Column(Modifier.statusBarsPadding()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -111,9 +133,14 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                             tint = HmTextPrimary, modifier = Modifier.size(20.dp))
                     }
                     Spacer(Modifier.weight(1f))
-                    CircleIconButton(onClick = { /* filters panel: phase 2 (NOTES) */ }) {
-                        Icon(Icons.Outlined.FilterList, contentDescription = "filters",
-                            tint = HmTextPrimary, modifier = Modifier.size(20.dp))
+                    Box {
+                        var filterOpen by remember { mutableStateOf(false) }
+                        CircleIconButton(onClick = { filterOpen = true }) {
+                            Icon(Icons.Outlined.FilterList, contentDescription = "filters",
+                                tint = if (filterOpen) HmPurple else HmTextPrimary,
+                                modifier = Modifier.size(20.dp))
+                        }
+                        FilterMenu(expanded = filterOpen, onDismiss = { filterOpen = false })
                     }
                     Spacer(Modifier.width(12.dp))
                     CircleIconButton(onClick = { searchOpen = !searchOpen }) {
@@ -122,15 +149,6 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                             tint = if (searchOpen) HmPurple else HmTextPrimary,
                             modifier = Modifier.size(20.dp))
                     }
-                }
-                AnimatedVisibility(visible = searchOpen) {
-                    SearchField(
-                        value = st.query,
-                        onValueChange = vm::setQuery,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                    )
                 }
                 if (st.phase == ConnPhase.RECONNECTING) {
                     Text(
@@ -155,7 +173,9 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().background(HmBackground)) {
+        androidx.compose.foundation.layout.BoxWithConstraints(
+            modifier = Modifier.fillMaxSize().background(HmBackground)
+        ) {
             // Official home artwork (extracted from the APK's own drawable) faded at the bottom.
             Box(
                 modifier = Modifier
@@ -253,6 +273,16 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                     }
                 }
             }
+            if (searchOpen) {
+                SearchPill(
+                    query = st.query,
+                    onQueryChange = vm::setQuery,
+                    onClose = { searchOpen = false; vm.setQuery("") },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = maxHeight * 0.42f, start = 16.dp, end = 16.dp),
+                )
+            }
         }
     }
 }
@@ -341,14 +371,17 @@ fun AgentAvatar(name: String, bitmap: androidx.compose.ui.graphics.ImageBitmap?)
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun SessionChildRow(row: SessionRow, working: Boolean, onClick: () -> Unit) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 12.dp)
             .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = { menuOpen = true })
             .padding(horizontal = 4.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -403,6 +436,34 @@ private fun SessionChildRow(row: SessionRow, working: Boolean, onClick: () -> Un
             Text(relTime(row.updatedAt), color = HmTextMuted, fontSize = 13.sp)
         }
     }
+    // official long-press menu: Pin / Archive / Rename (actions wired in a later pass)
+    SessionContextMenu(opened = menuOpen, onDismiss = { menuOpen = false })
+    }
+}
+
+@Composable
+private fun SessionContextMenu(opened: Boolean, onDismiss: () -> Unit) {
+    DropdownMenu(
+        expanded = opened,
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF141F3C),
+        shape = RoundedCornerShape(14.dp),
+        tonalElevation = 0.dp,
+    ) {
+        ContextItem(Icons.Outlined.PushPin, "Pin", "True")
+        ContextItem(Icons.Outlined.Archive, "Archive", null)
+        ContextItem(Icons.Outlined.Edit, "Rename", null)
+    }
+}
+
+@Composable
+private fun ContextItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String?) {
+    DropdownMenuItem(
+        text = { Text(label, color = HmTextPrimary, fontSize = 15.sp) },
+        leadingIcon = { Icon(icon, contentDescription = null, tint = HmTextPrimary, modifier = Modifier.size(20.dp)) },
+        trailingIcon = if (value != null) { { Text(value, color = HmTextMuted, fontSize = 14.sp) } } else null,
+        onClick = { /* TODO: wire to gateway session actions */ },
+    )
 }
 
 @Composable
@@ -436,23 +497,91 @@ private fun MoreSessionsRow(count: Int, loading: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun SearchField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier) {
-    androidx.compose.material3.OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        placeholder = { Text(stringResource(R.string.search_placeholder), color = HmTextMuted) },
-        singleLine = true,
-        shape = RoundedCornerShape(14.dp),
-        trailingIcon = {
-            Icon(Icons.Outlined.Search, contentDescription = null, tint = HmTextMuted)
+private fun SearchPill(query: String, onQueryChange: (String) -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .height(52.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .background(Color(0xFF16213F))
+                .padding(horizontal = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.Search, contentDescription = null,
+                tint = HmTextMuted, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(12.dp))
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(color = HmTextPrimary, fontSize = 15.sp),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(HmPurple),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                decorationBox = { inner ->
+                    Box {
+                        if (query.isEmpty()) {
+                            Text("Search agents and sessions", color = HmTextMuted, fontSize = 15.sp)
+                        }
+                        inner()
+                    }
+                },
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF16213F))
+                .clickable(onClick = onClose),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.Close, contentDescription = "close search",
+                tint = HmTextPrimary, modifier = Modifier.size(22.dp))
+        }
+    }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+}
+
+@Composable
+private fun FilterMenu(expanded: Boolean, onDismiss: () -> Unit) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF141F3C),
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 0.dp,
+        modifier = Modifier.width(268.dp),
+    ) {
+        FilterItem(Icons.Outlined.ViewAgenda, "View", "By agent")
+        FilterItem(Icons.Outlined.Sort, "Sort", "Recent activity")
+        FilterItem(Icons.Outlined.History, "Recent sessions", "Last day")
+        Spacer(Modifier.height(6.dp))
+        Box(Modifier.padding(horizontal = 16.dp).height(1.dp).background(HmBorder))
+        Spacer(Modifier.height(6.dp))
+        FilterItem(Icons.Outlined.ScreenRotationAlt, "Show", "All")
+        FilterItem(Icons.Outlined.PeopleOutline, "Agents", "All")
+        FilterItem(Icons.Outlined.FolderOpen, "Project", "All projects")
+        FilterItem(Icons.Outlined.Layers, "Include", "Group chats")
+    }
+}
+
+@Composable
+private fun FilterItem(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String) {
+    DropdownMenuItem(
+        text = {
+            Column {
+                Text(title, color = HmTextPrimary, fontSize = 16.sp)
+                Text(subtitle, color = HmTextMuted, fontSize = 13.sp)
+            }
         },
-        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = HmPurple,
-            unfocusedBorderColor = Color(0xFF2A3A6E),
-            cursorColor = HmPurple,
-            focusedTextColor = HmTextPrimary,
-            unfocusedTextColor = HmTextPrimary,
-        ),
-        modifier = modifier,
+        leadingIcon = { Icon(icon, contentDescription = null, tint = HmTextPrimary, modifier = Modifier.size(20.dp)) },
+        trailingIcon = { Icon(Icons.Outlined.ArrowForwardIos, contentDescription = null, tint = HmTextMuted, modifier = Modifier.size(12.dp)) },
+        onClick = { /* TODO: filter submenus */ },
     )
 }
