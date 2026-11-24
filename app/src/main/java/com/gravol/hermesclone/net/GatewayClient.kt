@@ -189,10 +189,14 @@ class GatewayClient(rawBaseUrl: String) {
             val root = get("$baseUrl/api/sessions/$sessionId/messages?limit=$limit&order=latest")
                 ?: error("empty response")
             val arr = (root as? JsonObject)?.get("messages") as? JsonArray ?: JsonArray(emptyList())
+            // Verified live 2026-11-24 (curl with the app's exact limit=24&order=latest):
+            // rows arrive ASCENDING (oldest first) — no reversal needed.
             arr.mapNotNull { el ->
                 if (el !is JsonObject) return@mapNotNull null
                 val role = firstString(el, "role") ?: return@mapNotNull null
                 if (role == "tool" || role == "system") return@mapNotNull null
+                // server marks rows invisible to chat UI (interrupted turns etc.)
+                if (firstString(el, "display_kind") == "hidden") return@mapNotNull null
                 val content = firstString(el, "content") ?: ""
                 val cards = (el["tool_calls"] as? JsonArray)?.mapNotNull { tc ->
                     if (tc !is JsonObject) return@mapNotNull null
@@ -206,11 +210,13 @@ class GatewayClient(rawBaseUrl: String) {
                     )
                 }.orEmpty()
                 if (role == "assistant" && content.isBlank() && cards.isEmpty()) return@mapNotNull null
+                val ts = (el["timestamp"] as? JsonPrimitive)?.content?.toDoubleOrNull()
                 ChatMsg(
                     key = "h" + (firstString(el, "id") ?: System.nanoTime().toString()),
                     role = role,
                     content = content,
                     tools = cards,
+                    ts = ts?.toLong(),
                 )
             }
         }

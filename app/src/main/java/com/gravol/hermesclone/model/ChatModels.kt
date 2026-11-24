@@ -26,6 +26,8 @@ data class ChatMsg(
     val reasoning: String = "",
     val tools: List<ToolCard> = emptyList(),
     val usageLine: String? = null,
+    /** epoch seconds from the history row (VERIFIED live: rows carry float `timestamp`) */
+    val ts: Long? = null,
 )
 
 /** A clarify question (VERIFIED capture tour3: {qid, question, choices|null, multi_select}). */

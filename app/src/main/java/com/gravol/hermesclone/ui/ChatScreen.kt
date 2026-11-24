@@ -1,7 +1,10 @@
 package com.gravol.hermesclone.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -39,6 +43,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.Check
@@ -130,36 +135,31 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back",
                         tint = HmTextPrimary, modifier = Modifier.size(20.dp))
                 }
-                Column(
+                // Official: title pill overlaps the avatar's lower edge; no model chip in
+                // the header (model lives in Chat Settings — pill tap opens the sheet).
+                Box(
                     Modifier
                         .align(Alignment.Center)
                         .padding(horizontal = 60.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    AgentAvatar(name = chat.profile.ifBlank { "Hermes" },
-                        bitmap = st.avatars[chat.profile])
-                    Spacer(Modifier.height(5.dp))
+                    Box(Modifier.align(Alignment.TopCenter)) {
+                        AgentAvatar(name = chat.profile.ifBlank { "Hermes" },
+                            bitmap = st.avatars[chat.profile])
+                    }
                     Text(
                         chat.title.ifBlank { "Session" },
                         fontSize = 14.sp,
                         color = HmTextPrimary,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .offset(y = 22.dp)
                             .widthIn(max = 240.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(HmSurface)
+                            .clickable { vm.openModelSheet() }
                             .padding(horizontal = 14.dp, vertical = 6.dp),
                     )
-                    if (!chat.model.isNullOrBlank())
-                        Text(
-                            chat.model + "  \u25be", fontSize = 11.sp, color = HmPurple, maxLines = 1,
-                            modifier = Modifier
-                                .padding(top = 3.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(HmToolPill)
-                                .clickable { vm.openModelSheet() }
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        )
                 }
                 Box(
                     Modifier
@@ -179,7 +179,7 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
             ChatComposer(
                 vm,
                 enabled = chat.shortId != null && !chat.sending,
-                agentName = chat.profile.ifBlank { "Hermes" },
+                agentName = if (chat.profile.isBlank() || chat.profile == "default") "Hermes" else chat.profile,
             )
         },
         containerColor = HmBackground,
@@ -197,6 +197,28 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                     CircularProgressIndicator(color = HmLiveBlue, modifier = Modifier.size(28.dp))
                 }
             } else {
+                // Official turn grouping (verified 2026-11-24): consecutive assistant
+                // rows between user rows are ONE turn; all their tool calls collapse
+                // into a single pill anchored at the first tool-bearing row.
+                val turnMap = remember(chat.messages) {
+                    val map = HashMap<String, Pair<String, List<ToolCard>>>()
+                    val msgs = chat.messages
+                    var i = 0
+                    while (i < msgs.size) {
+                        if (msgs[i].role == "assistant") {
+                            var j = i
+                            while (j < msgs.size && msgs[j].role == "assistant") j++
+                            val run = msgs.subList(i, j).toList()
+                            val tools = run.flatMap { it.tools }
+                            if (tools.isNotEmpty()) {
+                                val anchor = run.first { it.tools.isNotEmpty() }.key
+                                run.forEach { map[it.key] = anchor to tools }
+                            }
+                            i = j
+                        } else i++
+                    }
+                    map
+                }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.weight(1f),
@@ -205,7 +227,12 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(chat.messages, key = { it.key }) { msg ->
-                        MessageRow(msg, spinner = "")
+                        val turn = turnMap[msg.key]
+                        MessageRow(
+                            msg, spinner = "",
+                            turnTools = if (turn != null && turn.first == msg.key) turn.second else emptyList(),
+                            showTools = turn == null || turn.first == msg.key,
+                        )
                     }
                     val s = chat.streaming
                     if (s != null) {
@@ -524,17 +551,28 @@ private fun inlineMd(line: String): AnnotatedString = buildAnnotatedString {
 }
 
 @Composable
-private fun MessageRow(msg: ChatMsg, spinner: String) {
+private fun MessageRow(
+    msg: ChatMsg,
+    spinner: String,
+    turnTools: List<ToolCard> = emptyList(),
+    showTools: Boolean = true,
+) {
     if (msg.role == "user") {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
             Box(
                 modifier = Modifier
-                    .widthIn(max = 340.dp)
-                    .clip(RoundedCornerShape(20.dp))
+                    .widthIn(max = 360.dp)
+                    .clip(RoundedCornerShape(24.dp))
                     .background(HmUserBubble)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
             ) {
-                Text(msg.content, color = HmTextPrimary, fontSize = 15.sp)
+                Text(msg.content, color = HmTextPrimary, fontSize = 16.sp, lineHeight = 23.sp)
+            }
+            msg.ts?.let {
+                Text(
+                    userStamp(it), color = HmTextMuted, fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 6.dp, end = 4.dp),
+                )
             }
         }
         return
@@ -548,10 +586,9 @@ private fun MessageRow(msg: ChatMsg, spinner: String) {
                 modifier = Modifier.padding(bottom = 4.dp),
             )
         }
-        if (msg.tools.isNotEmpty()) {
-            Column(Modifier.padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                msg.tools.forEach { ToolPill(it) }
-            }
+        if (showTools && (turnTools.isNotEmpty() || msg.tools.isNotEmpty())) {
+            TurnPill(if (turnTools.isNotEmpty()) turnTools else msg.tools,
+                key = msg.key, modifier = Modifier.padding(bottom = 6.dp))
         }
         if (msg.content.isNotEmpty()) {
             MdText(msg.content)
@@ -593,6 +630,69 @@ private fun MessageRow(msg: ChatMsg, spinner: String) {
                         tint = HmTextMuted, modifier = Modifier.size(12.dp))
                 }
                 HorizontalDivider(color = HmBorder.copy(alpha = 0.35f), thickness = 1.dp)
+            }
+        }
+    }
+}
+
+/** Official user-row stamp: "Nov 23, 8:59 PM" */
+private fun userStamp(epochSec: Long): String =
+    java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.US)
+        .format(java.util.Date(epochSec * 1000))
+
+/**
+ * Official collapses a finished turn's tool calls into ONE row:
+ * green check circle + "Ran N commands and made M tool calls" + chevron;
+ * tap expands the individual tool rows. Live turns show a blue spinner.
+ * (commands = terminal calls; everything else counts as a tool call)
+ */
+@Composable
+private fun TurnPill(tools: List<ToolCard>, key: String, modifier: Modifier = Modifier) {
+    var expanded by remember(key) { mutableStateOf(false) }
+    val commands = tools.count { it.name == "terminal" }
+    val others = tools.size - commands
+    val allDone = tools.all { it.done }
+    val label = buildString {
+        append("Ran ")
+        append(if (commands == 1) "1 command" else "$commands commands")
+        if (others > 0) {
+            append(" and made ")
+            append(if (others == 1) "1 tool call" else "$others tool calls")
+        }
+    }
+    Column(modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(HmTurnPill)
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (allDone) {
+                Box(
+                    Modifier
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .background(HmTurnCheck),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Check, contentDescription = null,
+                        tint = Color(0xFFEAF7EE), modifier = Modifier.size(12.dp))
+                }
+            } else {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = HmLiveBlue)
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(label, color = HmTextPrimary, fontSize = 14.sp,
+                modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.ExpandMore, contentDescription = null,
+                tint = HmTextMuted, modifier = Modifier.size(20.dp))
+        }
+        AnimatedVisibility(visible = expanded) {
+            Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                tools.forEach { ToolPill(it) }
             }
         }
     }
@@ -682,6 +782,17 @@ private fun ChatComposer(vm: AppViewModel, enabled: Boolean, agentName: String) 
                 shape = RoundedCornerShape(22.dp),
                 maxLines = 5,
             )
+            // Official has a mic inside the pill's right edge (voice capture not wired yet)
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable { /* voice capture: NOTES gap */ },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Mic, contentDescription = "Voice",
+                    tint = HmTextMuted, modifier = Modifier.size(22.dp))
+            }
         }
         Spacer(Modifier.width(8.dp))
         Box(
