@@ -30,6 +30,12 @@ data class SessionRow(
     val hidden: Boolean = false,
     /** every id-ish field the gateway returned, for short↔long id matching */
     val idCandidates: Set<String> = setOf(id),
+    /** roster `pinned` flag from the server (0/1 int in SQLite-JSON) */
+    val serverPinned: Boolean = false,
+    /** profile this row was loaded under (archived screen + delete/archive calls need it) */
+    val profile: String = "",
+    /** roster message_count, shown on the Archived screen ("19 messages") */
+    val messageCount: Int? = null,
 )
 
 class SessionPage(val sessions: List<SessionRow>, val total: Int?)

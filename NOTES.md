@@ -169,3 +169,34 @@ Verified against server source (BigRed /home/jeff/.hermes/hermes-agent/tui_gatew
 - UI gotchas: ModalBottomSheet fully-expanded drag handle sits under the status bar — swiping it down
   pulls the NOTIFICATION SHADE instead of closing the sheet (adb automation; real touch is fine but
   same region). Sheet scroll via adb swipe is flaky; verify switch paths server-side, not just by UI dump.
+
+
+## PHASE 5 (static A/B parity, emulator rig) — DONE 2026-11-24 (batches A-D)
+Rig: official app (ai.nousresearch.hermes.mobile v1.0.0-44) + clone side-by-side on Clerk emulator-5554,
+both through relay :8099 -> SSH tunnel -> BigRed :9119. Vision-diff every screen.
+- Home: status-bar insets (topBar was under the clock — taps eaten), floating search pill, 7-row filter
+  menu, long-press Pin/Archive/Rename, official settings screen, compose profile sheet.
+- Avatars are SERVER FILES (~/.hermes/profiles/*/assets/avatar.png) fetched via WS profiles.get_asset —
+  param is `name` NOT `profile` (wrong one -> "name required"). Result {found, mime, data: data-url b64}.
+- Default profile displays as "Hermes" EVERYWHERE (home header, compose picker, composer placeholder) —
+  no display_name on the server; it's a client-side brand fallback.
+- Group order: live group first, then newest session activity desc. Auto-expand groups whose newest
+  activity < 24h; user toggle wins (expandedByUser).
+- Chat history GET /messages?limit=24&order=latest returns ASCENDING (oldest first) — do NOT reverse.
+  Rows carry float `timestamp`, `display_kind:"hidden"` rows (interrupted turns) must be skipped.
+- Official collapses a finished turn's consecutive assistant rows into ONE pill: green check (#29A551)
+  on #17313F bg, "Ran N commands and made M tool calls" (commands = terminal calls), chevron expands.
+- Emulator adb quirks: fast flicks (<=300ms swipes) are IGNORED; use 400ms+ swipes. `input text` drops
+  spaces — encode as %s. Screenrecord runs ~8-15 fps (GPU-off emulator).
+
+## PHASE 6 (motion) — DONE 2026-11-24 (batch E)
+- Technique: `settings put global animator_duration_scale 10` makes ~300ms anims measurable at the
+  emulator's ~15fps screenrecord; measure first-static-gap span, divide by 10; restore with
+  `settings delete` (not 1).
+- Measured official: group expand 386 ms, collapse 383 ms (symmetric). Clone set to 380/380,
+  re-verified 369 ms. Nav push/pop not isolable on emulator (live spinner + lazy-load pollute the
+  diff) -> used Pixel-8 frame-verified official numbers 233/266 ms -> clone 240/270.
+- Pinned material3:1.4.0 (official ships 1.4.0 spring sheet motion; BOM default was 1.3.x).
+  Compiles clean; compose sheet re-verified visually.
+- UNRESOLVED: group-header timestamp semantics (5w/1d/blank). Not oldest session (job-logger 23w blank),
+  not dir mtime, roster row has no such field. Clone shows newest-session age; left as documented gap.

@@ -3,63 +3,75 @@ package com.gravol.hermesclone.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Mic
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
-import androidx.compose.material.icons.filled.MoreHoriz
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.ArrowForwardIos
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DesktopWindows
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.ArrowForwardIos
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -73,16 +85,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -91,6 +102,7 @@ import com.gravol.hermesclone.model.ModelSheetState
 import com.gravol.hermesclone.model.PendingSrq
 import com.gravol.hermesclone.model.ToolCard
 import com.gravol.hermesclone.state.AppViewModel
+
 
 /**
  * Phase 2 chat surface. Wire contract VERIFIED (capture bundle ev_0e07a669 + live 2026-11-24):
@@ -104,6 +116,7 @@ import com.gravol.hermesclone.state.AppViewModel
 fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     val st by vm.state.collectAsStateWithLifecycle()
     val chat = st.chat
+    var chatMore by remember { mutableStateOf(false) }
     BackHandler { vm.closeChat(); onBack() }
 
     val listState = rememberLazyListState()
@@ -162,16 +175,47 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                     )
                 }
                 Box(
-                    Modifier
+                    modifier = Modifier
                         .size(44.dp)
                         .align(Alignment.CenterEnd)
                         .clip(CircleShape)
                         .background(HmSurface)
-                        .clickable { /* session More menu: phase 4 (NOTES) */ },
+                        .clickable { chatMore = true },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Filled.MoreHoriz, contentDescription = "more",
                         tint = HmTextPrimary, modifier = Modifier.size(20.dp))
+                }
+                // official chat more-menu (verified vs official 2026-11-24):
+                // Chat Settings / Live Mode / Terminal / Execution / Routines / Artifacts /
+                // Bot Screen / Archive / Delete(red). Only Archive/Delete/Live Mode are wired.
+                DropdownMenu(
+                    expanded = chatMore,
+                    onDismissRequest = { chatMore = false },
+                    containerColor = Color(0xFF141F3C),
+                    shape = RoundedCornerShape(14.dp),
+                    tonalElevation = 0.dp,
+                ) {
+                    ChatMoreItem(Icons.Filled.Tune, "Chat Settings") { }
+                    HorizontalDivider(color = HmBorder.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
+                    ChatMoreItem(Icons.Filled.Insights, "Live Mode") { vm.toggleLiveMode() }
+                    HorizontalDivider(color = HmBorder.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
+                    ChatMoreItem(Icons.Filled.Terminal, "Terminal") { }
+                    ChatMoreItem(Icons.Filled.Code, "Execution") { }
+                    HorizontalDivider(color = HmBorder.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
+                    ChatMoreItem(Icons.Filled.History, "Routines") { }
+                    ChatMoreItem(Icons.Filled.Inventory2, "Artifacts") { }
+                    ChatMoreItem(Icons.Filled.DesktopWindows, "Bot Screen") { }
+                    HorizontalDivider(color = HmBorder.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
+                    ChatMoreItem(Icons.Outlined.Archive, "Archive") {
+                        chatMore = false
+                        chat.row?.let { vm.setArchived(it, true) }
+                        vm.closeChat()
+                    }
+                    ChatMoreItem(Icons.Filled.Delete, "Delete", color = HmDanger) {
+                        chatMore = false
+                        vm.openDeleteDialog()
+                    }
                 }
             }
         },
@@ -256,6 +300,55 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     }
 
     if (st.modelSheet.open) ModelSheet(vm, st.modelSheet)
+
+    // official delete confirm (copy verified 2026-11-24)
+    if (st.deleteDialog && chat.row != null) {
+        AlertDialog(
+            onDismissRequest = { vm.closeDeleteDialog() },
+            containerColor = Color(0xFF101A33),
+            title = { Text("Delete this conversation?", color = HmTextPrimary, fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold) },
+            text = { Text("Its transcript is removed from the server. Archiving keeps it.",
+                color = HmTextMuted, fontSize = 14.sp) },
+            confirmButton = {
+                TextButton(onClick = { vm.deleteSession(chat.row!!); vm.closeChat() }) {
+                    Text("Delete", color = HmDanger, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.closeDeleteDialog() }) { Text("Cancel", color = HmLiveBlue) }
+            },
+        )
+    }
+
+    // toast snackbar on chat screen too (archive)
+    st.toast?.let { msg ->
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 16.dp).padding(top = 96.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xFF0F2A24))
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = HmTurnCheck,
+                    modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(msg, color = HmTextPrimary, fontSize = 15.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatMoreItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String,
+                         color: androidx.compose.ui.graphics.Color = HmTextPrimary, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label, color = color, fontSize = 15.sp) },
+        leadingIcon = { Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp)) },
+        onClick = onClick,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

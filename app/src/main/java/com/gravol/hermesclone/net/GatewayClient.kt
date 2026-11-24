@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -172,7 +173,7 @@ class GatewayClient(rawBaseUrl: String) {
                 if (el !is JsonObject) {
                     val s = el.jsonPrimitive.contentOrNull
                     if (!s.isNullOrBlank()) SessionRow(s, s, null) else null
-                } else parseSession(el)
+                } else parseSession(el, profile)
             }
             SessionPage(rows, total)
         }
@@ -263,21 +264,30 @@ class GatewayClient(rawBaseUrl: String) {
         }
     }
 
-    private fun parseSession(el: JsonObject): SessionRow? {
+    private fun parseSession(el: JsonObject, profile: String = ""): SessionRow? {
         val id = firstString(el, "id", "session_id", "sessionid", "sid") ?: return null
         val title = firstString(el, "title", "name", "label", "summary")
             ?: getString(el, "first_message")?.take(80)
             ?: "Untitled session"
         val updatedAt = longOf(el, "last_active", "updated_at", "updated", "last_active_at",
             "last_message_at", "last_activity_at", "modified_at", "created_at")
-        val archived = (el["archived"] as? JsonPrimitive)?.booleanOrNull ?: false
-        val hidden = (el["hidden"] as? JsonPrimitive)?.booleanOrNull ?: false
+        // roster rows are SQLite-JSON: booleans arrive as 0/1 ints, not true/false
+        // (verified against the official app's row model cnc.java 2026-11-24)
+        val archived = truthy(el["archived"] as? JsonPrimitive)
+        val hidden = truthy(el["hidden"] as? JsonPrimitive)
+        val pinnedSrv = truthy(el["pinned"] as? JsonPrimitive)
         val candidates = mutableSetOf(id)
         for (k in listOf("session_id", "live_id", "short_id", "sid", "id")) {
             (el[k] as? JsonPrimitive)?.contentOrNull?.let { if (it.isNotBlank()) candidates.add(it) }
         }
-        return SessionRow(id, title, updatedAt, archived, hidden, candidates)
+        val msgCount = (el["message_count"] as? JsonPrimitive)?.intOrNull
+            ?: (el["messages"] as? JsonPrimitive)?.intOrNull
+        return SessionRow(id, title, updatedAt, archived, hidden, candidates,
+            serverPinned = pinnedSrv, profile = profile, messageCount = msgCount)
     }
+
+    private fun truthy(p: JsonPrimitive?): Boolean =
+        p != null && p.content.lowercase() in setOf("true", "1")
 
     private fun firstString(o: JsonObject, vararg keys: String): String? {
         for (k in keys) {

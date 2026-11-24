@@ -69,6 +69,9 @@ data class ChatState(
     val running: Boolean = false,
     val sending: Boolean = false,
     val error: String? = null,
+    /** the roster row this chat was opened from (archive/delete menu actions) */
+    val row: SessionRow? = null,
+    val liveMode: Boolean = true,
 )
 
 data class UiState(
@@ -90,11 +93,19 @@ data class UiState(
     val pendingSrqs: List<PendingSrq> = emptyList(),
     /** phase 4: model picker sheet */
     val modelSheet: ModelSheetState = ModelSheetState(),
+    /** phase 7 (menu parity): local pins (gateway has no pin endpoint — official stores on-device) */
+    val pinnedIds: Set<String> = emptySet(),
+    val archived: List<SessionRow> = emptyList(),
+    val archivedOpen: Boolean = false,
+    val renameTarget: Pair<SessionRow, String>? = null, // row to profile
+    val toast: String? = null,
+    val deleteDialog: Boolean = false,
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = app.getSharedPreferences("gateways", Application.MODE_PRIVATE)
+    private val localPrefs = app.getSharedPreferences("hm_local", Application.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     private val _state = MutableStateFlow(UiState())
@@ -118,6 +129,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         _state.update { it.copy(gateways = loadGateways()) }
+        loadPins()
     }
 
     // ---------------------------------------------------------------- gateways
@@ -712,12 +724,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val g = st.groups[profile] ?: ProfileGroup(profile)
                     val merged = if (replace) page.sessions
                         else (g.sessions + page.sessions).distinctBy { it.id }
-                    st.copy(groups = st.groups + (profile to g.copy(
-                        sessions = merged,
-                        total = page.total ?: g.total,
-                        loadedPages = if (replace) 1 else g.loadedPages + 1,
-                        loading = false,
-                    )))
+                    // official: archived rows are absent from the list; an "Archived" entry
+                    // at the bottom opens a dedicated screen (verified vs official 2026-11-24)
+                    // REST rows don't reliably carry the archived flag, and a silent roster
+                    // refresh would otherwise resurrect an archived row — the local archived
+                    // list is authoritative for rows this device has archived/unarchived.
+                    val knownArch = st.archived.filter { it.profile == profile }
+                    val isArch = { r: SessionRow ->
+                        r.archived || knownArch.any { a -> a.idCandidates.any { c -> r.idCandidates.contains(c) } }
+                    }
+                    val (arch, live) = merged.partition { isArch(it) }
+                    val others = st.archived.filter { it.profile != profile }
+                    st.copy(
+                        groups = st.groups + (profile to g.copy(
+                            sessions = live,
+                            total = page.total ?: g.total,
+                            loadedPages = if (replace) 1 else g.loadedPages + 1,
+                            loading = false,
+                        )),
+                        archived = (others + arch).sortedByDescending { it.updatedAt ?: 0L },
+                    )
                 }
                 orderGroupsByRecency() // re-sort once sessions land
             }.onFailure {
@@ -772,6 +798,114 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun selectProfile(name: String?) = _state.update { it.copy(selectedProfile = name) }
     fun setQuery(q: String) = _state.update { it.copy(query = q) }
 
+    // ---- phase 7 menu parity (behaviors verified vs official 2026-11-24) ----
+
+    /** Pin is on-device only (official: row jumps to group top + yellow pin icon). */
+    fun togglePin(row: SessionRow) {
+        val pinned = _state.value.pinnedIds
+        val isPinned = row.idCandidates.any { it in pinned }
+        val next = if (isPinned) pinned - row.idCandidates
+                   else pinned + row.idCandidates
+        _state.update { it.copy(pinnedIds = next, toast = if (isPinned) "Conversation unpinned" else "Conversation pinned") }
+        localPrefs.edit().putString("pinned", next.joinToString(",")).apply()
+        autoClearToast()
+    }
+
+    private fun loadPins() {
+        val raw = localPrefs.getString("pinned", "") ?: ""
+        if (raw.isNotBlank()) _state.update { it.copy(pinnedIds = raw.split(",").filter { it.isNotBlank() }.toSet()) }
+    }
+
+    fun setRenameTarget(row: SessionRow) = _state.update { it.copy(renameTarget = row to row.profile) }
+    fun clearRenameTarget() = _state.update { it.copy(renameTarget = null) }
+
+    fun renameSession(row: SessionRow, profile: String, title: String) {
+        val t = title.trim()
+        _state.update { it.copy(renameTarget = null) }
+        if (t.isEmpty() || t == row.title) return
+        viewModelScope.launch {
+            val w = ws ?: return@launch
+            runCatching {
+                w.rpc("session.title", buildJsonObject {
+                    put("session_id", row.id); put("title", t)
+                    if (profile.isNotBlank()) put("profile", profile)
+                })
+            }.onSuccess {
+                _state.update { st -> st.copy(
+                    groups = st.groups.mapValues { (_, g) -> g.copy(
+                        sessions = g.sessions.map { if (it.id == row.id) it.copy(title = t) else it }) },
+                    archived = st.archived.map { if (it.id == row.id) it.copy(title = t) else it },
+                    chat = if (st.chat.longId == row.id || st.chat.shortId in row.idCandidates)
+                        st.chat.copy(title = t) else st.chat,
+                ) }
+            }.onFailure { _state.update { it.copy(toast = "Rename failed") }; autoClearToast() }
+        }
+    }
+
+    fun setArchived(row: SessionRow, archived: Boolean) {
+        viewModelScope.launch {
+            val w = ws ?: return@launch
+            runCatching {
+                w.rpc("session.archive", buildJsonObject {
+                    put("session_id", row.id); put("archived", archived)
+                    if (row.profile.isNotBlank()) put("profile", row.profile)
+                })
+            }.onSuccess {
+                _state.update { st ->
+                    val g = st.groups[row.profile]
+                    st.copy(
+                        groups = if (g != null) st.groups + (row.profile to g.copy(
+                            sessions = if (archived) g.sessions.filter { it.id != row.id }
+                                       else (st.archived.find { it.id == row.id }?.let { listOf(it) } ?: listOf(row)) + g.sessions
+                        )) else st.groups,
+                        archived = if (archived) (st.archived + row).sortedByDescending { it.updatedAt ?: 0L }
+                                   else st.archived.filter { it.id != row.id },
+                        toast = if (archived) "Conversation archived" else "Conversation unarchived",
+                    )
+                }
+                autoClearToast()
+            }.onFailure { _state.update { it.copy(toast = "Archive failed") }; autoClearToast() }
+        }
+    }
+
+    fun deleteSession(row: SessionRow) {
+        viewModelScope.launch {
+            val w = ws ?: return@launch
+            runCatching {
+                w.rpc("session.delete", buildJsonObject {
+                    put("session_id", row.id)
+                    if (row.profile.isNotBlank()) put("profile", row.profile)
+                })
+            }.onSuccess {
+                _state.update { st ->
+                    val g = st.groups[row.profile]
+                    st.copy(
+                        groups = if (g != null) st.groups + (row.profile to g.copy(
+                            sessions = g.sessions.filter { it.id != row.id }
+                        )) else st.groups,
+                        archived = st.archived.filter { it.id != row.id },
+                        deleteDialog = false,
+                        chat = if (st.chat.longId == row.id || st.chat.shortId in row.idCandidates)
+                            st.chat.copy(open = false) else st.chat,
+                    )
+                }
+            }.onFailure { _state.update { it.copy(toast = "Delete failed", deleteDialog = false) }; autoClearToast() }
+        }
+    }
+
+    fun toggleLiveMode() = _state.update { it.copy(chat = it.chat.copy(liveMode = !it.chat.liveMode)) }
+    fun openDeleteDialog() = _state.update { it.copy(deleteDialog = true) }
+    fun closeDeleteDialog() = _state.update { it.copy(deleteDialog = false) }
+    fun openArchived() = _state.update { it.copy(archivedOpen = true) }
+    fun closeArchived() = _state.update { it.copy(archivedOpen = false) }
+
+    private fun autoClearToast() {
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(2400)
+            _state.update { it.copy(toast = null) }
+        }
+    }
+
     fun newSession(profile: String) {
         val w = ws ?: return
         viewModelScope.launch {
@@ -811,6 +945,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(chat = ChatState(
                 open = true, longId = row.id, profile = profile,
                 title = row.title, shortId = shortId, loading = true,
+                row = row,
             ))
         }
         val c = client ?: return

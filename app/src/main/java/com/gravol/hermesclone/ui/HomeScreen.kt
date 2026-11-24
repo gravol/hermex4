@@ -1,5 +1,6 @@
 package com.gravol.hermesclone.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -7,34 +8,15 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material.icons.outlined.PushPin
-import androidx.compose.material.icons.outlined.Archive
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.ViewAgenda
-import androidx.compose.material.icons.outlined.Sort
-import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.ScreenRotationAlt
-import androidx.compose.material.icons.outlined.PeopleOutline
-import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -42,29 +24,51 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.ArrowForwardIos
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Create
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.PeopleOutline
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.ScreenRotationAlt
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Sort
+import androidx.compose.material.icons.outlined.ViewAgenda
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -73,6 +77,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -80,6 +85,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -90,7 +97,9 @@ import com.gravol.hermesclone.net.GatewayClient
 import com.gravol.hermesclone.state.AppViewModel
 import com.gravol.hermesclone.state.ConnPhase
 import com.gravol.hermesclone.state.ProfileGroup
+import com.gravol.hermesclone.state.UiState
 import com.gravol.hermesclone.util.relTime
+
 
 /**
  * Session home, matched to the official 01-launch screenshot:
@@ -235,7 +244,13 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                                     onClick = { vm.toggleExpand(profile) },
                                 )
                             }
+                            val q = st.query.trim().lowercase()
+                            val pinnedOf = { row: com.gravol.hermesclone.model.SessionRow ->
+                                row.serverPinned || row.idCandidates.any { it in st.pinnedIds }
+                            }
                             val shown = group.sessions
+                                .filter { q.isEmpty() || it.title.lowercase().contains(q) }
+                                .sortedByDescending { pinnedOf(it) } // official: pinned float to group top
                             items(shown, key = { "sess-${profile}-${it.id}" }) { row ->
                                 AnimatedVisibility(
                                     visible = group.expanded,
@@ -248,7 +263,11 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                                     SessionChildRow(
                                         row = row,
                                         working = vm.isWorking(row),
+                                        pinned = pinnedOf(row),
                                         onClick = { vm.openChat(row, profile) },
+                                        onPin = { vm.togglePin(row) },
+                                        onArchive = { vm.setArchived(row, true) },
+                                        onRename = { vm.setRenameTarget(row) },
                                     )
                                 }
                             }
@@ -280,6 +299,52 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                     avatars = st.avatars,
                     onPick = { p -> composeSheet = false; vm.newSession(p) },
                     onDismiss = { composeSheet = false },
+                )
+            }
+            // official: "Archived" entry pinned at screen bottom while any session is archived
+            if (st.archived.isNotEmpty() && !searchOpen) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 20.dp, bottom = 28.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { vm.openArchived() }
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.Archive, contentDescription = null, tint = HmTextPrimary,
+                        modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Archived", color = HmTextPrimary, fontSize = 16.sp)
+                }
+            }
+            // official snackbar: dark pill + green check, top center ("Conversation pinned")
+            st.toast?.let { msg ->
+                AnimatedVisibility(
+                    visible = true,
+                    enter = slideInVertically(tween(280)) { -it } + fadeIn(tween(280)),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 96.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(Color(0xFF0F2A24))
+                            .padding(horizontal = 18.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Color(0xFF29A551),
+                            modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text(msg, color = HmTextPrimary, fontSize = 15.sp)
+                    }
+                }
+            }
+            // official rename dialog: "Rename conversation" + prefilled field + "Title" + Cancel/Rename
+            st.renameTarget?.let { (row, profile) ->
+                RenameDialog(row.title,
+                    onCancel = { vm.clearRenameTarget() },
+                    onRename = { t -> vm.renameSession(row, profile, t) },
                 )
             }
             if (searchOpen) {
@@ -382,7 +447,15 @@ fun AgentAvatar(name: String, bitmap: androidx.compose.ui.graphics.ImageBitmap?)
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SessionChildRow(row: SessionRow, working: Boolean, onClick: () -> Unit) {
+private fun SessionChildRow(
+    row: SessionRow,
+    working: Boolean,
+    pinned: Boolean,
+    onClick: () -> Unit,
+    onPin: () -> Unit,
+    onArchive: () -> Unit,
+    onRename: () -> Unit,
+) {
     var menuOpen by remember { mutableStateOf(false) }
     Box {
     Row(
@@ -430,6 +503,13 @@ private fun SessionChildRow(row: SessionRow, working: Boolean, onClick: () -> Un
             maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.width(8.dp))
+        if (pinned) {
+            Icon(
+                Icons.Filled.PushPin, contentDescription = null,
+                tint = Color(0xFFE8C444), modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+        }
         if (working) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(
@@ -445,13 +525,27 @@ private fun SessionChildRow(row: SessionRow, working: Boolean, onClick: () -> Un
             Text(relTime(row.updatedAt), color = HmTextMuted, fontSize = 13.sp)
         }
     }
-    // official long-press menu: Pin / Archive / Rename (actions wired in a later pass)
-    SessionContextMenu(opened = menuOpen, onDismiss = { menuOpen = false })
+    // official long-press menu (verified vs official 2026-11-24): Pin<->Unpin / Archive / Rename
+    SessionContextMenu(
+        opened = menuOpen,
+        pinned = pinned,
+        onDismiss = { menuOpen = false },
+        onPin = { menuOpen = false; onPin() },
+        onArchive = { menuOpen = false; onArchive() },
+        onRename = { menuOpen = false; onRename() },
+    )
     }
 }
 
 @Composable
-private fun SessionContextMenu(opened: Boolean, onDismiss: () -> Unit) {
+private fun SessionContextMenu(
+    opened: Boolean,
+    pinned: Boolean,
+    onDismiss: () -> Unit,
+    onPin: () -> Unit,
+    onArchive: () -> Unit,
+    onRename: () -> Unit,
+) {
     DropdownMenu(
         expanded = opened,
         onDismissRequest = onDismiss,
@@ -459,19 +553,19 @@ private fun SessionContextMenu(opened: Boolean, onDismiss: () -> Unit) {
         shape = RoundedCornerShape(14.dp),
         tonalElevation = 0.dp,
     ) {
-        ContextItem(Icons.Outlined.PushPin, "Pin", "True")
-        ContextItem(Icons.Outlined.Archive, "Archive", null)
-        ContextItem(Icons.Outlined.Edit, "Rename", null)
+        ContextItem(if (pinned) Icons.Outlined.PushPin else Icons.Outlined.PushPin,
+            if (pinned) "Unpin" else "Pin", onPin)
+        ContextItem(Icons.Outlined.Archive, "Archive", onArchive)
+        ContextItem(Icons.Outlined.Edit, "Rename", onRename)
     }
 }
 
 @Composable
-private fun ContextItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String?) {
+private fun ContextItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
     DropdownMenuItem(
         text = { Text(label, color = HmTextPrimary, fontSize = 15.sp) },
         leadingIcon = { Icon(icon, contentDescription = null, tint = HmTextPrimary, modifier = Modifier.size(20.dp)) },
-        trailingIcon = if (value != null) { { Text(value, color = HmTextMuted, fontSize = 14.sp) } } else null,
-        onClick = { /* TODO: wire to gateway session actions */ },
+        onClick = onClick,
     )
 }
 
@@ -636,5 +730,138 @@ private fun FilterItem(icon: androidx.compose.ui.graphics.vector.ImageVector, ti
         leadingIcon = { Icon(icon, contentDescription = null, tint = HmTextPrimary, modifier = Modifier.size(20.dp)) },
         trailingIcon = { Icon(Icons.Outlined.ArrowForwardIos, contentDescription = null, tint = HmTextMuted, modifier = Modifier.size(12.dp)) },
         onClick = { /* TODO: filter submenus */ },
+    )
+}
+
+
+// ---------------------------------------------------------------------------
+// phase 7: archived screen + rename dialog (verified vs official 2026-11-24)
+
+@Composable
+fun ArchivedScreen(st: UiState, vm: AppViewModel, onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
+    Scaffold(
+        topBar = {
+            Row(
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircleIconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "back",
+                        tint = HmTextPrimary, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.width(16.dp))
+                Text("Archived", color = HmTextPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        containerColor = Color.Transparent,
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp),
+        ) {
+            items(st.archived, key = { "arch-${it.profile}-${it.id}" }) { row ->
+                ArchivedRow(
+                    row = row,
+                    pinned = row.serverPinned || row.idCandidates.any { it in st.pinnedIds },
+                    avatar = st.avatars[row.profile],
+                    onClick = { vm.openChat(row, row.profile) },
+                    onUnpin = { vm.togglePin(row) },
+                    onUnarchive = { vm.setArchived(row, false) },
+                    onRename = { vm.setRenameTarget(row) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArchivedRow(
+    row: com.gravol.hermesclone.model.SessionRow,
+    pinned: Boolean,
+    avatar: androidx.compose.ui.graphics.ImageBitmap?,
+    onClick: () -> Unit,
+    onUnpin: () -> Unit,
+    onUnarchive: () -> Unit,
+    onRename: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .combinedClickable(onClick = onClick, onLongClick = { menuOpen = true })
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AgentAvatar(name = row.profile, bitmap = avatar)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(row.title, color = HmTextPrimary, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(2.dp))
+                Text(if (row.profile == "default") "Hermes" else row.profile, color = HmTextMuted, fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (pinned) {
+                        Icon(Icons.Filled.PushPin, contentDescription = null, tint = Color(0xFFE8C444),
+                            modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(5.dp))
+                    }
+                    Text(relTime(row.updatedAt), color = HmTextMuted, fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(2.dp))
+                row.messageCount?.let {
+                    Text("$it messages", color = HmTextMuted, fontSize = 13.sp)
+                }
+            }
+        }
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            containerColor = Color(0xFF141F3C),
+            shape = RoundedCornerShape(14.dp),
+            tonalElevation = 0.dp,
+        ) {
+            ContextItem(Icons.Outlined.PushPin, if (pinned) "Unpin" else "Pin") { menuOpen = false; onUnpin() }
+            ContextItem(Icons.Outlined.Archive, "Unarchive") { menuOpen = false; onUnarchive() }
+            ContextItem(Icons.Outlined.Edit, "Rename") { menuOpen = false; onRename() }
+        }
+    }
+}
+
+@Composable
+fun RenameDialog(current: String, onCancel: () -> Unit, onRename: (String) -> Unit) {
+    var text by remember { mutableStateOf(TextFieldValue(text = current, selection = TextRange(current.length))) }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        containerColor = Color(0xFF101A33),
+        title = { Text("Rename conversation", color = HmTextPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = HmTextPrimary, unfocusedTextColor = HmTextPrimary,
+                        focusedBorderColor = HmLiveBlue, unfocusedBorderColor = HmBorder,
+                        focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("Title", color = HmTextMuted, fontSize = 12.sp)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onRename(text.text) }) {
+                Text("Rename", color = HmLiveBlue, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancel", color = HmLiveBlue) }
+        },
     )
 }

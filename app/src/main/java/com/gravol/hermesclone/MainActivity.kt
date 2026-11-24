@@ -25,9 +25,10 @@ import com.gravol.hermesclone.ui.GatewaySwitcherScreen
 import com.gravol.hermesclone.ui.HermesCloneTheme
 import com.gravol.hermesclone.ui.ChatScreen
 import com.gravol.hermesclone.ui.HomeScreen
+import com.gravol.hermesclone.ui.ArchivedScreen
 import com.gravol.hermesclone.ui.SettingsScreen
 
-private enum class Screen(val depth: Int) { HOME(0), SETTINGS(1), GATEWAY(1), CHAT(2) }
+private enum class Screen(val depth: Int) { HOME(0), SETTINGS(1), GATEWAY(1), ARCHIVED(1), CHAT(2) }
 
 class MainActivity : ComponentActivity() {
 
@@ -46,6 +47,7 @@ class MainActivity : ComponentActivity() {
                     (disconnected && st.error != null)
                 val screen = when {
                     st.chat.open -> Screen.CHAT
+                    st.archivedOpen -> Screen.ARCHIVED
                     showSettings -> Screen.SETTINGS
                     onSwitcher -> Screen.GATEWAY
                     else -> Screen.HOME
@@ -79,6 +81,8 @@ class MainActivity : ComponentActivity() {
                     when (target) {
                         Screen.CHAT ->
                             ChatScreen(vm = vm, onBack = { /* state cleared by vm.closeChat */ })
+                        Screen.ARCHIVED ->
+                            ArchivedScreen(st, vm, onBack = { vm.closeArchived() })
                         Screen.SETTINGS ->
                             SettingsScreen(vm, onBack = { showSettings = false }, onOpenGateways = { showSwitcher = true })
                         Screen.GATEWAY ->
