@@ -239,9 +239,11 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                             items(shown, key = { "sess-${profile}-${it.id}" }) { row ->
                                 AnimatedVisibility(
                                     visible = group.expanded,
-                                    enter = expandVertically(tween(300, easing = FastOutSlowInEasing)) +
-                                        fadeIn(tween(300)),
-                                    exit = shrinkVertically(tween(240)) + fadeOut(tween(180)),
+                                    // Official 10x-frame measured 2026-11-24: expand 386 ms,
+                                    // collapse 383 ms (symmetric).
+                                    enter = expandVertically(tween(380, easing = FastOutSlowInEasing)) +
+                                        fadeIn(tween(380)),
+                                    exit = shrinkVertically(tween(380)) + fadeOut(tween(300)),
                                 ) {
                                     SessionChildRow(
                                         row = row,
@@ -613,7 +615,7 @@ private fun ComposeSheet(
                 ) {
                     AgentAvatar(name = p, bitmap = avatars[p])
                     Spacer(Modifier.width(16.dp))
-                    Text(p, color = HmTextPrimary, fontSize = 16.sp)
+                    Text(if (p == "default") "Hermes" else p, color = HmTextPrimary, fontSize = 16.sp)
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(HmBorder.copy(alpha = 0.5f)))
             }

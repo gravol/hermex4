@@ -53,22 +53,24 @@ class MainActivity : ComponentActivity() {
                 AnimatedContent(
                     targetState = screen,
                     transitionSpec = {
-                        // Deeper screens slide in from the right; shallower from the left —
-                        // the standard Material3 predictive back shape, 320ms FastOutSlowIn.
+                        // Deeper screens slide in from the right; shallower from the left.
+                        // Official durations frame-verified on Pixel 8 (Hermex4 pass):
+                        // push 233 ms, pop 266 ms of moving frames.
                         val forward = screen.depth > initialState.depth
+                        val dur = if (forward) 240 else 270
                         val enter = if (forward) {
-                            slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { it / 3 } +
-                                fadeIn(tween(220, easing = LinearOutSlowInEasing))
+                            slideInHorizontally(tween(dur, easing = FastOutSlowInEasing)) { it / 3 } +
+                                fadeIn(tween((dur * 0.7).toInt(), easing = LinearOutSlowInEasing))
                         } else {
-                            slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { -it / 3 } +
-                                fadeIn(tween(220, easing = LinearOutSlowInEasing))
+                            slideInHorizontally(tween(dur, easing = FastOutSlowInEasing)) { -it / 3 } +
+                                fadeIn(tween((dur * 0.7).toInt(), easing = LinearOutSlowInEasing))
                         }
                         val exit = if (forward) {
-                            slideOutHorizontally(tween(320, easing = FastOutSlowInEasing)) { -it / 3 } +
-                                fadeOut(tween(220))
+                            slideOutHorizontally(tween(dur, easing = FastOutSlowInEasing)) { -it / 3 } +
+                                fadeOut(tween((dur * 0.7).toInt()))
                         } else {
-                            slideOutHorizontally(tween(320, easing = FastOutSlowInEasing)) { it / 3 } +
-                                fadeOut(tween(220))
+                            slideOutHorizontally(tween(dur, easing = FastOutSlowInEasing)) { it / 3 } +
+                                fadeOut(tween((dur * 0.7).toInt()))
                         }
                         enter togetherWith exit
                     },
