@@ -49,6 +49,7 @@ data class ProfileGroup(
     val total: Int? = null,
     val loadedPages: Int = 0,
     val expanded: Boolean = false,
+    val expandedByUser: Boolean = false,
     val loading: Boolean = false,
 )
 
@@ -83,6 +84,7 @@ data class UiState(
     val query: String = "",
     val refreshing: Boolean = false,
     val avatars: Map<String, ImageBitmap> = emptyMap(),
+    val profileOrder: List<String> = emptyList(),
     val chat: ChatState = ChatState(),
     /** unanswered server->client requests (approval/clarify cards), phase 3 */
     val pendingSrqs: List<PendingSrq> = emptyList(),
@@ -288,6 +290,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .filter { known[it]?.sessions?.isEmpty() != false }
             .forEach { loadPage(it, 0, replace = true) }
         loadAvatars(_state.value.profiles.map { it.name })
+        orderGroupsByRecency()
+    }
+
+    /**
+     * Official order (verified 2026-11-24 vs official app on same gateway):
+     * group with a live/working session first, then by most-recent session activity
+     * descending. Auto-expand groups whose newest activity is within 24h
+     * (official: live group + link-curator(13h) expanded; clerk(1w)/job-logger(23w) collapsed).
+     */
+    private fun orderGroupsByRecency() {
+        _state.update { st ->
+            val nowSec = System.currentTimeMillis() / 1000
+            val liveProfiles = st.working.mapNotNull { id ->
+                st.groups.entries.firstOrNull { (_, g) -> g.sessions.any { id in it.idCandidates } }?.key
+            }.toSet()
+            val sorted = st.profiles.map { it.name }.sortedWith(
+                compareByDescending<String> { it in liveProfiles }
+                    .thenByDescending { st.groups[it]?.sessions?.maxOfOrNull { s -> s.updatedAt ?: 0L } ?: 0L }
+            )
+            st.copy(
+                profileOrder = sorted,
+                groups = st.groups.mapValues { (name, g) ->
+                    val newest = g.sessions.maxOfOrNull { s -> s.updatedAt ?: 0L } ?: 0L
+                    if (g.expandedByUser) g
+                    else g.copy(expanded = name in liveProfiles || (newest > 0 && nowSec - newest < 86400))
+                },
+            )
+        }
     }
 
     private suspend fun refreshActiveLists(w: WsClient) {
@@ -689,6 +719,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         loading = false,
                     )))
                 }
+                orderGroupsByRecency() // re-sort once sessions land
             }.onFailure {
                 _state.update { st ->
                     val g = st.groups[profile] ?: ProfileGroup(profile)
@@ -734,7 +765,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { st ->
             val g = st.groups[profile] ?: return@update st
             val nowExpanded = !g.expanded
-            st.copy(groups = st.groups + (profile to g.copy(expanded = nowExpanded)))
+            st.copy(groups = st.groups + (profile to g.copy(expanded = nowExpanded, expandedByUser = true)))
         }
     }
 
@@ -997,7 +1028,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching {
                     // profiles.get_asset — avatar png base64 (CONTRACT.md; result shape guessed)
                     val res = w.rpc("profiles.get_asset", buildJsonObject {
-                        put("profile", p)
+                        put("name", p) // gateway _resolve_profile wants "name", not "profile"
                         put("asset", "avatar")
                     })
                     val b64 = when (res) {
@@ -1015,6 +1046,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     withContext(Dispatchers.Main) {
                         _state.update { it.copy(avatars = it.avatars + (p to bmp.asImageBitmap())) }
                     }
+                }.onFailure { e ->
+                    android.util.Log.d("AvatarFetch", "profile=$p failed: ${e.message}")
                 }
             }
         }

@@ -107,8 +107,9 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
     val pts = rememberPullToRefreshState()
 
     val query = st.query.trim().lowercase()
-    val visibleProfiles = st.profiles
-        .map { it.name }
+    val ordered = if (st.profileOrder.isNotEmpty()) st.profileOrder
+        else st.profiles.map { it.name }
+    val visibleProfiles = ordered
         .filter { p -> st.selectedProfile == null || p == st.selectedProfile }
         .filter { p ->
             if (query.isEmpty()) true
@@ -226,7 +227,7 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                             val group = st.groups[profile] ?: ProfileGroup(profile)
                             item(key = "group-$profile") {
                                 GroupHeader(
-                                    name = profile,
+                                    name = if (profile == "default") "Hermes" else profile, // official: default renders as the app brand
                                     avatar = st.avatars[profile],
                                     updatedAt = group.sessions.maxOfOrNull { it.updatedAt ?: 0L }
                                         ?.takeIf { it > 0 },
