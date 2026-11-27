@@ -17,7 +17,7 @@ import com.gravol.hermesclone.R
 // bg #000022, warm-white text #F4F1EB, warm-gray muted #ABA9A5, live blue #447CFF
 // (session dots + "Working"), purple #8B5CF6 (avatars, title pill), circle/pill bg
 // #0C1A3C, user bubble #272740, mic circle #172D62, tree line #302F47.
-val HmBackground = Color(0xFF000000)
+val HmBackground = Color(0xFF000022)
 val HmSurface = Color(0xFF0C1A3C)
 val HmRowHighlight = Color(0xFF1D2761)
 val HmPurple = Color(0xFF8B5CF6)
@@ -33,7 +33,7 @@ val HmToolPill = Color(0xFF0C1A3C)
 val HmTurnPill = Color(0xFF17313F)
 val HmTurnCheck = Color(0xFF29A551)
 val HmBorder = Color(0xFF2A3A6A)
-val HmTreeLine = Color(0xFF302F47)
+val HmTreeLine = Color(0xFF2C3A57)
 val HmAccentCircle = Color(0xFF172D62)
 // vc49 parity pass (2026-11-26): stop circle sampled #402B43 with a cream square glyph;
 // markdown table card header #131331 / body #070727 (from official shots-tour-2026-11-26).

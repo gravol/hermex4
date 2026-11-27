@@ -86,6 +86,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -196,7 +198,7 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(560.dp)
+                    .height(700.dp)
                     .align(Alignment.BottomCenter)
                     .clipToBounds(),
             ) {
@@ -206,7 +208,7 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
-                        .alpha(0.12f),
+                        .alpha(0.45f),
                     contentScale = ContentScale.FillWidth,
                 )
                 Box(
@@ -519,33 +521,34 @@ private fun SessionChildRow(
             .padding(start = 12.dp)
             .clip(RoundedCornerShape(10.dp))
             .combinedClickable(onClick = onClick, onLongClick = { menuOpen = true })
-            .padding(horizontal = 4.dp, vertical = 7.75.dp),
+            .padding(horizontal = 4.dp, vertical = 7.25.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // tree connector: vertical line + horizontal tick to the status dot (official layout).
         // vc49 pitch fix (2026-11-26): official row pitch ~103px (39dp) at density 2.625;
         // the 44dp connector box was pushing ours to ~134px.
-        Box(
+        // tree connector (vc48b): official = 4px vertical line, small rounded elbow
+        // (~8dp radius, cubic: vertical tangent in, horizontal out), horizontal tick
+        // meeting the status dot. Measured official: line x83-86, tick to x123, r~8px.
+        Canvas(
             modifier = Modifier
                 .width(30.dp)
                 .height(24.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .width(2.dp)
-                    .height(24.dp)
-                    .align(Alignment.Center)
-                    .background(HmTreeLine),
-            )
-            Box(
-                modifier = Modifier
-                    .width(14.dp)
-                    .height(2.dp)
-                    .align(Alignment.CenterEnd)
-                    .background(HmTreeLine),
-            )
+            val stroke = 4f
+            val r = 8.dp.toPx()
+            val lx = 12.dp.toPx()
+            val cy = size.height / 2f
+            val endX = size.width - stroke / 2f + 4.dp.toPx()
+            val path = Path().apply {
+                moveTo(lx, 0f)
+                lineTo(lx, cy - r)
+                cubicTo(lx, cy - r / 2f, lx + r / 2f, cy, lx + r, cy)
+                lineTo(endX.coerceAtMost(lx + r + 14.dp.toPx()), cy)
+            }
+            drawPath(path, HmTreeLine, style = Stroke(width = stroke))
         }
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(10.dp))
         Box(
             modifier = Modifier
                 .size(8.dp)
@@ -635,12 +638,32 @@ private fun MoreSessionsRow(count: Int, loading: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 46.dp, end = 12.dp)
+            .padding(start = 12.dp, end = 12.dp)
             .clip(RoundedCornerShape(10.dp))
             .clickable(enabled = !loading) { onClick() }
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // official: the group's tree line elbows into a tick reaching this row (no dot).
+        Canvas(
+            modifier = Modifier
+                .width(30.dp)
+                .height(24.dp)
+                .padding(start = 30.dp),
+        ) {
+            val stroke = 4f
+            val r = 8.dp.toPx()
+            val lx = 12.dp.toPx()
+            val cy = size.height / 2f
+            val path = Path().apply {
+                moveTo(lx, 0f)
+                lineTo(lx, cy - r)
+                cubicTo(lx, cy - r / 2f, lx + r / 2f, cy, lx + r, cy)
+                lineTo(lx + r + 14.dp.toPx(), cy)
+            }
+            drawPath(path, HmTreeLine, style = Stroke(width = stroke))
+        }
+        Spacer(Modifier.width(16.dp))
         if (loading) {
             CircularProgressIndicator(modifier = Modifier.size(14.dp),
                 strokeWidth = 2.dp, color = HmPurple)

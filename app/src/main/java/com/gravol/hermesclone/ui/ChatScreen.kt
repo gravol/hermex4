@@ -1420,7 +1420,7 @@ private fun ChatComposer(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(28.dp))
-                    .background(HmSurface.copy(alpha = 0.55f))
+                    .background(HmSurface)
                     .padding(start = 4.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

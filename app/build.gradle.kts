@@ -14,27 +14,29 @@ android {
         applicationId = "com.gravol.hermesclone"
         minSdk = 26
         targetSdk = 35
-        versionCode = 47
-        versionName = "0.5.4.9-grouping"
+        versionCode = 50
+        versionName = "0.5.4.12-visual3"
     }
 
 
-    signingConfigs {
-        create("release") {
-            val ks = Properties().apply {
-                file(rootProject.file("keystore.properties")).inputStream().use { load(it) }
+    val releaseKeystore = rootProject.file("keystore.properties")
+    if (releaseKeystore.exists()) {
+        signingConfigs {
+            create("release") {
+                val ks = Properties().apply {
+                    releaseKeystore.inputStream().use { load(it) }
+                }
+                storeFile = file(ks.getProperty("storeFile"))
+                storePassword = ks.getProperty("storePassword")
+                keyAlias = ks.getProperty("keyAlias")
+                keyPassword = ks.getProperty("keyPassword")
             }
-            storeFile = file(ks.getProperty("storeFile"))
-            storePassword = ks.getProperty("storePassword")
-            keyAlias = ks.getProperty("keyAlias")
-            keyPassword = ks.getProperty("keyPassword")
         }
-    }
-
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+        buildTypes {
+            release {
+                isMinifyEnabled = false
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
