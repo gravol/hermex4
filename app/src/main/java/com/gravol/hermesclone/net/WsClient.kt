@@ -168,6 +168,16 @@ class WsClient(
         socket = null
     }
 
+    /** Hard kill: OkHttp cancel() tears the socket down WITHOUT the close
+     *  handshake — on a dead/half-open link close(1000) never completes, so
+     *  onClosed never fires and the app never reconnects (VERIFIED via
+     *  mid-turn relay kill on emulator, 2026-11-27). cancel() forces
+     *  onFailure → onClosed(-1) → scheduleReconnect. */
+    fun cancel() {
+        socket?.cancel()
+        socket = null
+    }
+
     /** Send a JSON-RPC request and suspend for its result. */
     suspend fun rpc(method: String, params: JsonObject): JsonElement {
         val id = nextId.getAndIncrement()

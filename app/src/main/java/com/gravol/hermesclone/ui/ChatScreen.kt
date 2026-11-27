@@ -148,7 +148,12 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     BackHandler { vm.closeChat(); onBack() }
 
-    val listState = rememberLazyListState()
+    // A reconnect resync REPLACES the list (often same size — the window slides). Replacing
+    // under a pending scrollToItem leaves the shared LazyListState wedged mid-list and
+    // unscrollable (VERIFIED 2026-11-27) — so on resyncTick we build a brand-new state and
+    // the unconditional initial bottom-scroll below re-arms and lands us at the newest turn.
+    // (Always the same remember branch — a conditional remember would crash on recompose.)
+    val listState = remember(chat.resyncTick) { androidx.compose.foundation.lazy.LazyListState() }
     var composerBarH by remember { mutableIntStateOf(0) }
     val streamLen = (chat.streaming?.content?.length ?: 0) + (chat.streaming?.reasoning?.length ?: 0)
     val totalItems = chat.messages.size + if (chat.streaming != null) 1 else 0
@@ -163,14 +168,17 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     // Chat open: land at the bottom once, unconditionally (the incremental follow guard below
     // is correct but useless if the chat opened at the top — vc37/38 regression: initial
     // bottom-scroll relied on racing the effect before first layout, which the emulator lost).
-    var didInitialScroll by remember(chat.shortId) { mutableStateOf(false) }
-    LaunchedEffect(chat.shortId, chat.messages.size) {
+    var didInitialScroll by remember(chat.shortId, chat.resyncTick) { mutableStateOf(false) }
+    LaunchedEffect(chat.shortId, chat.resyncTick, chat.messages.size) {
         if (!didInitialScroll && chat.messages.isNotEmpty()) {
             listState.scrollToItem(chat.messages.size - 1, 10_000_000)
             didInitialScroll = true
         }
     }
-    LaunchedEffect(chat.messages.size, streamLen) {
+    // lastKey in the key set: a resync can REPLACE the list with the SAME size (window
+    // slides: oldest item out, newest in) — size-only keys miss that, the LazyColumn keeps
+    // the old index and the view freezes mid-list (VERIFIED via resync logging 2026-11-27).
+    LaunchedEffect(chat.messages.size, streamLen, chat.messages.lastOrNull()?.key) {
         // layoutInfo here still reflects the PREVIOUS layout pass (effects run before layout),
         // so it tells us where the user actually was when this delta arrived: last item
         // visible = follow; scrolled away = stay put; drag back into view = resume.

@@ -104,6 +104,10 @@ data class ChatState(
     val composerPrefill: String? = null,
     /** message whose reaction sheet is open */
     val reactionTargetKey: String? = null,
+    /** bumped each time the reconnect resync replaces the message list — ChatScreen
+     *  uses it to fully reset the LazyColumn (a replace under a pending scrollToItem wedges
+     *  the scroll state mid-list: VERIFIED 2026-11-27) */
+    val resyncTick: Int = 0,
     /** "Regenerate this reply?" confirm */
     val regenerateDialog: Boolean = false,
     /** session.context_breakdown (VERIFIED live 2026-11-26), fetched when Session Settings opens */
@@ -638,8 +642,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 w.onEvent = { type, sessionId, payload, seq -> handleEvent(type, sessionId, payload, seq) }
                 w.onServerRequest = { id, method, params -> handleServerRequest(w, id, method, params) }
                 w.onClosed = { _, _ ->
-                    if (!manualDisconnect) _state.update {
-                        it.copy(phase = ConnPhase.RECONNECTING, statusText = "Reconnecting…")
+                    if (!manualDisconnect) {
+                        _state.update {
+                            it.copy(phase = ConnPhase.RECONNECTING, statusText = "Reconnecting…")
+                        }
+                        // The loop below has already exited (it breaks on success) — this
+                        // socket dying needs a FRESH loop, else the app is disconnected
+                        // forever (VERIFIED: stuck spinner after second drop, 2026-11-27).
+                        scheduleReconnect(c, gw)
                     }
                 }
                 ws = w
@@ -678,6 +688,61 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 handshake(w)
                 profilesSnapshot().forEach { p -> loadPage(p, 0, replace = true) }
+                // Re-sync the OPEN chat after a gap (Jeff 2026-11-27: a dropped WS that
+                // missed message.complete left the transcript stale + the "compacting..."
+                // spinner stuck forever — reconnect replayed open_requests + home list
+                // only, never the chat itself). Refetch messages, then trust the server's
+                // running flag to clear or keep the working state.
+                val reSync = _state.value.chat
+                if (reSync.open && reSync.longId.isNotBlank()) {
+                    android.util.Log.d("HMWATCH", "resync: fetch1 start long=${reSync.longId}")
+                    c.messages(reSync.longId)
+                        .onSuccess { msgs ->
+                            android.util.Log.d("HMWATCH", "resync: fetch1 ok n=${msgs.size} last=${msgs.lastOrNull()?.content?.take(30)}")
+                            _state.update { st -> st.copy(chat = st.chat.copy(messages = msgs, resyncTick = st.chat.resyncTick + 1)) }
+                        }
+                        .onFailure { e ->
+                            android.util.Log.d("HMWATCH", "resync: fetch1 FAIL ${e.message}")
+                        }
+                    // Belt-and-braces: the server read path has been observed briefly behind
+                    // right after a turn lands (2026-11-27) — one more pass after a beat.
+                    viewModelScope.launch {
+                        delay(2_500)
+                        if (_state.value.chat.longId == reSync.longId) {
+                            c.messages(reSync.longId)
+                                .onSuccess { msgs ->
+                                    android.util.Log.d("HMWATCH", "resync: fetch2 ok n=${msgs.size} last=${msgs.lastOrNull()?.content?.take(30)}")
+                                    _state.update { st -> st.copy(chat = st.chat.copy(messages = msgs, resyncTick = st.chat.resyncTick + 1)) }
+                                }
+                                .onFailure { e ->
+                                    android.util.Log.d("HMWATCH", "resync: fetch2 FAIL ${e.message}")
+                                }
+                        }
+                    }
+                    runCatching {
+                        (w.rpc("session.resume", buildJsonObject {
+                            put("session_id", reSync.longId)
+                            put("profile", reSync.profile)
+                            put("defer_history", true)
+                            put("omit_messages", true)
+                            put("close_on_disconnect", false
+                            )
+                        }) as? JsonObject)?.let { res ->
+                            val short = res["session_id"]?.jsonPrimitive?.contentOrNull
+                            if (!short.isNullOrBlank()) liveIdMap[short] = reSync.longId
+                            val isRunning = (res["running"] as? JsonPrimitive)?.booleanOrNull == true
+                            android.util.Log.d("HMWATCH", "resync: resume running=$isRunning short=$short")
+                            _state.update { st -> st.copy(chat = st.chat.copy(
+                                shortId = short ?: st.chat.shortId,
+                                running = isRunning,
+                                streaming = if (isRunning) st.chat.streaming else null,
+                                spinner = if (isRunning) st.chat.spinner else "",
+                                workingSinceMs = if (isRunning)
+                                    (st.chat.workingSinceMs ?: System.currentTimeMillis()) else null,
+                            )) }
+                        }
+                    }
+                }
                 _state.update { it.copy(phase = ConnPhase.LIVE, statusText = "") }
                 startPingLoop()
                 break
@@ -706,8 +771,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (s.takeHeartbeatAck()) { misses = 0; continue }
                 misses++
                 if (misses >= WsClient.HEARTBEAT_MISS_LIMIT) {
-                    // Dead link: close it; onClosed → RECONNECTING + scheduleReconnect.
-                    s.close()
+                    // Dead link: HARD kill; graceful close(1000) on a dead socket never
+                    // completes its handshake → onClosed never fires → no reconnect.
+                    // cancel() forces onFailure → onClosed(-1) → scheduleReconnect.
+                    s.cancel()
                     break
                 }
                 runCatching { s.sendHeartbeat() }
