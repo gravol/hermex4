@@ -345,8 +345,9 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                 // Official turn grouping (verified 2026-11-24): consecutive assistant
                 // rows between user rows are ONE turn; all their tool calls collapse
                 // into a single pill anchored at the first tool-bearing row.
+                // anchor key + tools + (firstTs, lastTs) of the assistant run
                 val turnMap = remember(chat.messages) {
-                    val map = HashMap<String, Pair<String, List<ToolCard>>>()
+                    val map = HashMap<String, Triple<String, List<ToolCard>, Pair<Long, Long>?>>()
                     val msgs = chat.messages
                     var i = 0
                     while (i < msgs.size) {
@@ -357,12 +358,21 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                             val tools = run.flatMap { it.tools }
                             if (tools.isNotEmpty()) {
                                 val anchor = run.first { it.tools.isNotEmpty() }.key
-                                run.forEach { map[it.key] = anchor to tools }
+                                val stamps = run.mapNotNull { it.ts }.sorted()
+                                val span = if (stamps.size >= 2) stamps.first() to stamps.last() else null
+                                run.forEach { map[it.key] = Triple(anchor, tools, span) }
                             }
                             i = j
                         } else i++
                     }
                     map
+                }
+                // official folds tool-only/thinking-only round-trips into the turn summary —
+                // blank-content rows render NOTHING unless they carry the turn pill (VERIFIED
+                // vs official 2026-11-27: clone was showing bare "Thought" shells per round-trip)
+                val renderedMsgs = chat.messages.filter { m ->
+                    m.role != "assistant" || m.content.isNotEmpty() || m.streaming ||
+                        (turnMap[m.key]?.let { it.first == m.key && it.second.isNotEmpty() } == true)
                 }
                 val lastAssistantKey = chat.messages.lastOrNull { it.role == "assistant" }?.key
                 LazyColumn(
@@ -372,15 +382,17 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                         start = 12.dp, end = 12.dp, top = 8.dp, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(chat.messages, key = { it.key }) { msg ->
+                    items(renderedMsgs, key = { it.key }) { msg ->
                         val turn = turnMap[msg.key]
+                        val isAnchor = turn != null && turn.first == msg.key
                         MessageRow(
                             msg, spinner = "",
-                            turnTools = if (turn != null && turn.first == msg.key) turn.second else emptyList(),
-                            showTools = (turn == null || turn.first == msg.key) && st.chatPrefs.showToolCalls,
+                            turnTools = if (isAnchor) turn!!.second else emptyList(),
+                            turnDurationSec = if (isAnchor) turn!!.third?.let { (it.second - it.first).toInt() } else null,
+                            showTools = (turn == null || isAnchor) && st.chatPrefs.showToolCalls,
+                            showActions = !(msg.role == "assistant" && msg.content.isEmpty()),
                             showThinking = st.chatPrefs.showThinking,
                             defaultExpandTurn = !st.chatPrefs.foldFinishedTurns,
-                            showActions = true,
                             showRegenerate = msg.key == lastAssistantKey,
                             onCopy = {
                                 clipboard.setText(AnnotatedString(msg.content))
@@ -1030,6 +1042,7 @@ private fun MessageRow(
     msg: ChatMsg,
     spinner: String,
     turnTools: List<ToolCard> = emptyList(),
+    turnDurationSec: Int? = null,
     showTools: Boolean = true,
     showThinking: Boolean = true,
     defaultExpandTurn: Boolean = false,
@@ -1075,7 +1088,7 @@ private fun MessageRow(
     Column(Modifier.fillMaxWidth()) {
         // vc49: thoughts render inline under a collapsible "Thought" heading (gray),
         // not a separate card (shot official49-chat-scroll2.png). Default collapsed.
-        if (showThinking && msg.reasoning.isNotBlank()) {
+        if (showThinking && msg.reasoning.isNotBlank() && (msg.content.isNotEmpty() || msg.streaming)) {
             // Official behavior (Jeff 2026-11-27): while streaming, the thought is OPEN by
             // default, capped to ~4 lines, and auto-scrolls internally as reasoning arrives;
             // tap ANYWHERE on the card to collapse; auto-collapses when the turn completes.
@@ -1123,7 +1136,7 @@ private fun MessageRow(
         }
         if (showTools && (turnTools.isNotEmpty() || msg.tools.isNotEmpty())) {
             TurnPill(if (turnTools.isNotEmpty()) turnTools else msg.tools,
-                key = msg.key, defaultExpanded = defaultExpandTurn,
+                key = msg.key, defaultExpanded = defaultExpandTurn, durationSec = turnDurationSec,
                 modifier = Modifier.padding(bottom = 6.dp))
         }
         if (msg.content.isNotEmpty()) {
@@ -1221,12 +1234,19 @@ private fun userStamp(epochSec: Long): String =
  */
 @Composable
 private fun TurnPill(tools: List<ToolCard>, key: String, defaultExpanded: Boolean = false,
-                     modifier: Modifier = Modifier) {
+                     durationSec: Int? = null, modifier: Modifier = Modifier) {
     var expanded by remember(key) { mutableStateOf(defaultExpanded) }
     val commands = tools.count { it.name == "terminal" }
     val others = tools.size - commands
     val allDone = tools.all { it.done }
-    val label = buildString {
+    // Official collapsed summary reads "Worked for 5 min, 58 sec · 6 tools" (VERIFIED
+    // 2026-11-27); the expanded detail card keeps the "Ran N commands..." phrasing.
+    val label = if (durationSec != null) {
+        val dur = if (durationSec >= 60)
+            "%d min, %d sec".format(durationSec / 60, durationSec % 60)
+        else "%d sec".format(durationSec)
+        "Worked for $dur · ${tools.size} ${if (tools.size == 1) "tool" else "tools"}"
+    } else buildString {
         append("Ran ")
         append(if (commands == 1) "1 command" else "$commands commands")
         if (others > 0) {
