@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hermes Clone</string>
+    <string name="connect_title">Connect to your gateway</string>
+    <string name="connect_hint">Gateway URL + username + password (basic auth). The gateway usually serves on port 9119, not a chat web UI in front of it.</string>
+    <string name="auth_error">Hermes did not accept that username and password.</string>
+    <string name="search_placeholder">Search agents and sessions</string>
+    <string name="working">Working</string>
+    <string name="more_sessions_loading">Load more…</string>
+    <plurals name="more_sessions">
+        <item quantity="one">%1$d more session</item>
+        <item quantity="other">%1$d more sessions</item>
+    </plurals>
+    <string name="sessions">Sessions</string>
+    <string name="all_agents">All</string>
+    <string name="connect">Connect</string>
+    <string name="gateway_url">Gateway URL</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="saved_gateways">Saved gateways</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="untitled_session">Untitled session</string>
+    <string name="no_sessions">No sessions yet</string>
+    <string name="connected">Live</string>
+    <string name="new_chat">New chat</string>
+</resources>
