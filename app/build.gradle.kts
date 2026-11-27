@@ -1,3 +1,4 @@
+import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,13 +14,27 @@ android {
         applicationId = "com.gravol.hermesclone"
         minSdk = 26
         targetSdk = 35
-        versionCode = 35
-        versionName = "0.5.3.1-regen"
+        versionCode = 36
+        versionName = "0.5.3.2-regen"
+    }
+
+
+    signingConfigs {
+        create("release") {
+            val ks = Properties().apply {
+                file(rootProject.file("keystore.properties")).inputStream().use { load(it) }
+            }
+            storeFile = file(ks.getProperty("storeFile"))
+            storePassword = ks.getProperty("storePassword")
+            keyAlias = ks.getProperty("keyAlias")
+            keyPassword = ks.getProperty("keyPassword")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
