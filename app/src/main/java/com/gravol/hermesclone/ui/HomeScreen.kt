@@ -307,7 +307,13 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                                     )
                                 }
                                 if (st.filterView != 3) { // Agents only: headers only, no rows
-                                    items(sortRows(rows), key = { "sess-$key-${it.id}" }) { row ->
+                                    // official shows only 5 preview rows per group; the rest lives
+                                    // behind "N more sessions" (VERIFIED against official home 2026-11-27).
+                                    // Filters/search keep showing every match — the cap is a browse affordance.
+                                    val browse = isAgentView && q.isEmpty() && st.filterAgent == null &&
+                                        st.filterProject == null && st.filterShow == 0
+                                    val shownRows = if (browse) sortRows(rows).take(5) else sortRows(rows)
+                                    items(shownRows, key = { "sess-$key-${it.id}" }) { row ->
                                         AnimatedVisibility(
                                             visible = expanded,
                                             enter = expandVertically(tween(380, easing = FastOutSlowInEasing)) +
@@ -315,7 +321,7 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                                             exit = shrinkVertically(tween(380)) + fadeOut(tween(300)),
                                         ) { rowFor(row) }
                                     }
-                                    val remaining = (group?.total ?: 0) - rows.size
+                                    val remaining = (group?.total ?: 0) - shownRows.size
                                     if (isAgentView && expanded && group != null && (remaining > 0 ||
                                                 (group.total == null && rows.isNotEmpty() &&
                                                     rows.size % GatewayClient.PAGE_SIZE == 0))
