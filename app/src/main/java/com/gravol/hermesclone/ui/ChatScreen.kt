@@ -32,6 +32,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -147,6 +149,7 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     BackHandler { vm.closeChat(); onBack() }
 
     val listState = rememberLazyListState()
+    var composerBarH by remember { mutableIntStateOf(0) }
     val streamLen = (chat.streaming?.content?.length ?: 0) + (chat.streaming?.reasoning?.length ?: 0)
     val totalItems = chat.messages.size + if (chat.streaming != null) 1 else 0
     // Follow-the-stream intent. canScrollForward alone is wrong: the list GROWS before the
@@ -178,6 +181,18 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
         val lastVisible = info.visibleItemsInfo.lastOrNull()
         val atBottom = lastVisible == null || lastVisible.index >= info.totalItemsCount - 1
         if (atBottom) {
+            listState.scrollToItem(totalItems - 1, 10_000_000)
+        }
+    }
+
+    // Keyboard raise/lower resizes the transcript viewport but does NOT re-pin it: the newest
+    // text hides under the composer. Re-pin when the bar height changes IF the user was at
+    // the bottom in the pre-resize layout pass.
+    LaunchedEffect(composerBarH) {
+        if (composerBarH == 0) return@LaunchedEffect
+        val info = listState.layoutInfo
+        val last = info.visibleItemsInfo.lastOrNull()
+        if (last != null && last.index >= info.totalItemsCount - 1 && totalItems > 0) {
             listState.scrollToItem(totalItems - 1, 10_000_000)
         }
     }
@@ -264,6 +279,7 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
         bottomBar = {
             ChatComposer(
                 vm,
+                onBarHeight = { composerBarH = it },
                 enabled = chat.shortId != null && !chat.sending,
                 agentName = agentName,
                 running = chat.running,
@@ -1294,6 +1310,7 @@ private fun ToolPill(t: ToolCard) {
 @Composable
 private fun ChatComposer(
     vm: AppViewModel,
+    onBarHeight: (Int) -> Unit = {},
     enabled: Boolean,
     agentName: String,
     running: Boolean,
@@ -1317,6 +1334,7 @@ private fun ChatComposer(
     }
     Column(
         Modifier.fillMaxWidth().imePadding().background(HmBackground)
+            .onSizeChanged { onBarHeight(it.height) }
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         // queue bar (official: prompts sent while working collect here)
