@@ -206,7 +206,7 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
-                        .alpha(0.32f),
+                        .alpha(0.12f),
                     contentScale = ContentScale.FillWidth,
                 )
                 Box(
@@ -361,6 +361,8 @@ fun HomeScreen(vm: AppViewModel, onOpenGateways: () -> Unit, onSettings: () -> U
                         modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(12.dp))
                     Text("Archived", color = HmTextPrimary, fontSize = 16.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(st.archived.size.toString(), color = HmTextMuted, fontSize = 16.sp)
                 }
             }
             // official snackbar: dark pill + green check, top center ("Conversation pinned")

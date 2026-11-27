@@ -17,7 +17,7 @@ import com.gravol.hermesclone.R
 // bg #000022, warm-white text #F4F1EB, warm-gray muted #ABA9A5, live blue #447CFF
 // (session dots + "Working"), purple #8B5CF6 (avatars, title pill), circle/pill bg
 // #0C1A3C, user bubble #272740, mic circle #172D62, tree line #302F47.
-val HmBackground = Color(0xFF000022)
+val HmBackground = Color(0xFF000000)
 val HmSurface = Color(0xFF0C1A3C)
 val HmRowHighlight = Color(0xFF1D2761)
 val HmPurple = Color(0xFF8B5CF6)
