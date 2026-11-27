@@ -306,7 +306,7 @@ private fun MoreFilterSheet(
     if (title == "Filter") {
         androidx.compose.ui.window.Dialog(onDismissRequest = { vm.moreSessionsFilterSheet(null) }) {
             androidx.compose.material3.Surface(
-                color = Color(0xFF141F3C), shape = RoundedCornerShape(18.dp), tonalElevation = 0.dp,
+                color = Color(0xFF0C1A3C), shape = RoundedCornerShape(18.dp), tonalElevation = 0.dp,
             ) {
                 Column(Modifier.width(300.dp).padding(vertical = 12.dp)) {
                     Text("Filter", color = HmTextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
@@ -341,7 +341,7 @@ private fun MoreFilterSheet(
         // Show / Project submenus reuse the home sheet dialog styling
         androidx.compose.ui.window.Dialog(onDismissRequest = { vm.moreSessionsFilterSheet("Filter") }) {
             androidx.compose.material3.Surface(
-                color = Color(0xFF141F3C), shape = RoundedCornerShape(18.dp), tonalElevation = 0.dp,
+                color = Color(0xFF0C1A3C), shape = RoundedCornerShape(18.dp), tonalElevation = 0.dp,
             ) {
                 Column(Modifier.width(300.dp).padding(vertical = 10.dp)) {
                     Text(title, color = HmTextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,

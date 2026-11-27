@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -613,7 +614,7 @@ private fun SessionContextMenu(
     DropdownMenu(
         expanded = opened,
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF141F3C),
+        containerColor = Color(0xFF0C1A3C),
         shape = RoundedCornerShape(14.dp),
         tonalElevation = 0.dp,
     ) {
@@ -743,7 +744,7 @@ private fun FilterMenu(st: UiState, vm: AppViewModel, expanded: Boolean, onDismi
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF141F3C),
+        containerColor = Color(0xFF0C1A3C),
         shape = RoundedCornerShape(16.dp),
         tonalElevation = 0.dp,
         modifier = Modifier.width(268.dp),
@@ -784,11 +785,20 @@ private fun ComposeSheet(
     var note by remember { mutableStateOf<String?>(null) }
     val q = query.trim().lowercase()
     val shown = profiles.filter { q.isEmpty() || it.lowercase().contains(q) }
+    // M3 1.4: open fully expanded like the official (skip the partial anchor).
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+    )
+    // Material3 opens at PartiallyExpanded even with skip=true; the official sheet
+    // opens fully expanded (handle ~20% down the screen), so drive it there.
+    LaunchedEffect(Unit) { sheetState.expand() }
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = HmBackground,
+        sheetState = sheetState,
     ) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+            .heightIn(min = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 120).dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Start a new session", color = HmTextPrimary, fontSize = 19.sp,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -825,22 +835,8 @@ private fun ComposeSheet(
                 )
             }
             Spacer(Modifier.height(6.dp))
-            // "New group" row (groups not wired to this gateway — honest note on tap)
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                    .clickable { note = "Groups aren't supported by this gateway yet" }
-                    .padding(vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(40.dp).clip(CircleShape).background(HmAccentCircle),
-                    contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.PeopleOutline, null, tint = HmTextPrimary,
-                        modifier = Modifier.size(19.dp))
-                }
-                Spacer(Modifier.width(16.dp))
-                Text("New group", color = HmTextPrimary, fontSize = 16.sp)
-            }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(HmBorder.copy(alpha = 0.5f)))
+            // vc52: official has NO "New group" row in the agent list — the affordance is
+            // only the people button top-right (off-v50-newsheet.png). Row removed.
             shown.forEach { p ->
                 Row(
                     modifier = Modifier.fillMaxWidth()
@@ -970,7 +966,7 @@ private fun ArchivedRow(
         DropdownMenu(
             expanded = menuOpen,
             onDismissRequest = { menuOpen = false },
-            containerColor = Color(0xFF141F3C),
+            containerColor = Color(0xFF0C1A3C),
             shape = RoundedCornerShape(14.dp),
             tonalElevation = 0.dp,
         ) {
@@ -1026,7 +1022,7 @@ private fun FilterSheet(st: UiState, vm: AppViewModel) {
     val projects = st.groups.values.flatMap { it.sessions }
         .groupBy { it.project }.entries.sortedByDescending { e -> e.value.size }
     androidx.compose.ui.window.Dialog(onDismissRequest = { vm.closeFilterSheet() }) {
-        Surface(color = Color(0xFF141F3C), shape = RoundedCornerShape(18.dp), tonalElevation = 0.dp) {
+        Surface(color = Color(0xFF0C1A3C), shape = RoundedCornerShape(18.dp), tonalElevation = 0.dp) {
             Column(Modifier.width(300.dp).padding(vertical = 10.dp)) {
                 Text(title, color = HmTextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 8.dp))

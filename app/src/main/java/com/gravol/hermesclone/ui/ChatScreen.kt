@@ -64,6 +64,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.material.icons.outlined.ArrowForwardIos
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BasicAlertDialog
@@ -145,8 +149,10 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     val st by vm.state.collectAsStateWithLifecycle()
     val chat = st.chat
     var chatMore by remember { mutableStateOf(false) }
+    var workspaceSheet by remember { mutableStateOf(false) } // vc52 Choose Workspace
     val clipboard = LocalClipboardManager.current
     BackHandler { vm.closeChat(); onBack() }
+    BackHandler(enabled = workspaceSheet) { workspaceSheet = false } // vc52
 
     // A reconnect resync REPLACES the list (often same size — the window slides). Replacing
     // under a pending scrollToItem leaves the shared LazyListState wedged mid-list and
@@ -251,15 +257,12 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                 DropdownMenu(
                     expanded = chatMore,
                     onDismissRequest = { chatMore = false },
-                    containerColor = Color(0xFF141F3C),
+                    containerColor = Color(0xFF0C1A3C),
                     shape = RoundedCornerShape(14.dp),
                     tonalElevation = 0.dp,
                 ) {
-                    // vc49: sheet renamed "Session Settings"
-                    ChatMoreItem(Icons.Filled.Tune, "Session Settings") {
-                        chatMore = false; vm.openChatSettings(true)
-                    }
-                    HorizontalDivider(color = HmBorder.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
+                    // vc52 (official vc49 crawl 2026-11-27): the More menu has NO
+                    // Session Settings row — the header title opens it (off-v50-chatmore.png).
                     ChatMoreItem(Icons.Filled.Insights, "Live Mode") { vm.toggleLiveMode() }
                     HorizontalDivider(color = HmBorder.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
                     ChatMoreItem(Icons.Filled.Terminal, "Terminal") { }
@@ -322,10 +325,16 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                 ) {
                     AgentAvatar(name = agentName, bitmap = st.avatars[chat.profile], avatarSize = 110.dp) // vc49 hero blob
                     Spacer(Modifier.height(20.dp))
+                    // vc52: workspace name is a clickable chip that opens the
+                    // Choose Workspace sheet (off-v50-hero.png: chip + muted "?").
+                    // Compose 1.7.6 has no SpanStyle.ClickabilityStyle — detect the
+                    // tap position and hit-test the chip's character range instead.
+                    val wsPrefix = "What are we working on in "
+                    var wsLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
                     Text(
                         buildAnnotatedString {
                             withStyle(SpanStyle(color = HmTextPrimary)) {
-                                append("What are we working on in ")
+                                append(wsPrefix)
                             }
                             withStyle(SpanStyle(color = HmLiveBlue, fontWeight = FontWeight.Bold)) {
                                 append(workspaceLabel)
@@ -334,6 +343,15 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                         },
                         fontSize = 22.sp, fontWeight = FontWeight.SemiBold, lineHeight = 30.sp,
                         textAlign = TextAlign.Center,
+                        onTextLayout = { wsLayout = it },
+                        modifier = Modifier.pointerInput(workspaceLabel) {
+                            detectTapGestures { offset ->
+                                val layout = wsLayout ?: return@detectTapGestures
+                                val idx = layout.getOffsetForPosition(offset)
+                                if (idx in wsPrefix.length until wsPrefix.length + workspaceLabel.length)
+                                    workspaceSheet = true
+                            }
+                        },
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
@@ -434,6 +452,7 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
 
     if (st.modelSheet.open) ModelSheet(vm, st.modelSheet)
     if (chat.settingsSheet) SessionSettingsSheet(vm, st, chat, workspaceLabel)
+    if (workspaceSheet) WorkspacePickerSheet(workspaceLabel, onDismiss = { workspaceSheet = false })
     if (chat.renameTarget) ChatRenameDialog(vm, chat.title)
 
     // vc49: "Add Reaction" emoji sheet (official49-react-picker.png)
@@ -525,18 +544,25 @@ private fun ChatMoreItem(icon: androidx.compose.ui.graphics.vector.ImageVector, 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SessionSettingsSheet(vm: AppViewModel, st: UiState, chat: ChatState, workspaceLabel: String) {
+    // vc52: official sheet opens FULLY expanded (handle ~109dp down — off-v50-sessionsettings.png)
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    LaunchedEffect(Unit) { sheetState.expand() }
     ModalBottomSheet(
         onDismissRequest = { vm.openChatSettings(false) },
         containerColor = HmSurface,
+        sheetState = sheetState,
         dragHandle = { BottomSheetDefaults.DragHandle(color = HmTextMuted) },
     ) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 6.dp).padding(bottom = 28.dp)) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 6.dp).padding(bottom = 28.dp)
+            .heightIn(min = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 120).dp)
+            .verticalScroll(rememberScrollState())) {
             Text("Session Settings", color = HmTextPrimary, fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
             ContextUsageCard(chat)
             SettingLine("Title", chat.title.ifBlank { "Session" }) { vm.openChatRename(true) }
-            SettingLine("Workspace", workspaceLabel)
-            SettingLine("Profile", if (chat.profile.isBlank() || chat.profile == "default") "Hermes" else chat.profile)
+            // vc52: official Workspace/Profile values sit RIGHT of the label on the same row
+            SettingLineRight("Workspace", workspaceLabel)
+            SettingLineRight("Profile", if (chat.profile.isBlank() || chat.profile == "default") "Hermes" else chat.profile)
             Text("Show in this chat", color = HmTextMuted, fontSize = 13.sp,
                 modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
             // vc49 reworded subtitle (official49-sessionsettings-2.png)
@@ -633,6 +659,92 @@ private fun SettingLine(label: String, value: String?, chevron: Boolean = false,
         }
         if (chevron) Icon(Icons.Outlined.ChevronRight, null, tint = HmTextMuted,
             modifier = Modifier.size(18.dp))
+    }
+}
+
+// vc52: official Session Settings Workspace/Profile rows — label left, value right, one row.
+@Composable
+private fun SettingLineRight(label: String, value: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 12.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = HmTextMuted, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Text(value, color = HmTextPrimary, fontSize = 15.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+// vc52 RENDER-ONLY port of the official Choose Workspace sheet (off-v50-workspace.png):
+// centered title, "Projects and folders" search field, Home Folder default row
+// ("Work without a project" subline), Projects ▸ New Project…, Recent Directories
+// (needs server listing — not shown, no backend work requested), Choose Folder… footer.
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WorkspacePickerSheet(workspaceLabel: String, onDismiss: () -> Unit) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    LaunchedEffect(Unit) { sheetState.expand() }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = HmSurface,
+        sheetState = sheetState,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = HmTextMuted) },
+    ) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 6.dp).padding(bottom = 28.dp)
+            .heightIn(min = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 120).dp)
+            .verticalScroll(rememberScrollState())) {
+            Text("Choose Workspace", color = HmTextPrimary, fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth()
+                    .padding(bottom = 14.dp), textAlign = TextAlign.Center)
+            Row(
+                Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(24.dp))
+                    .background(HmBackground).padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.Search, null, tint = HmTextMuted, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Projects and folders", color = HmTextMuted, fontSize = 14.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .clickable { onDismiss() }
+                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(workspaceLabel, color = HmTextPrimary, fontSize = 16.sp)
+                    Text("Work without a project", color = HmTextMuted, fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp))
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Text("Projects", color = HmTextMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .clickable { /* render-only: project creation not wired */ }
+                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Add, null, tint = HmTextPrimary, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(14.dp))
+                Text("New Project…", color = HmTextPrimary, fontSize = 16.sp)
+            }
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(color = HmBorder.copy(alpha = 0.5f))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .clickable { /* render-only: server folder browse not wired */ }
+                    .padding(vertical = 12.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Choose Folder…", color = HmTextPrimary, fontSize = 16.sp)
+                    Text("Browse the server's folders", color = HmTextMuted, fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp))
+                }
+            }
+        }
     }
 }
 
@@ -1349,6 +1461,9 @@ private fun ChatComposer(
     prefill: String?,
 ) {
     var text by remember { mutableStateOf("") }
+    var attachMenu by remember { mutableStateOf(false) } // vc52 render-only attach menu
+    var barHPx by remember { mutableIntStateOf(0) }
+    BackHandler(enabled = attachMenu) { attachMenu = false }
     // Edit (queued or user pill) pushes text back into the composer
     LaunchedEffect(prefill) {
         if (!prefill.isNullOrEmpty()) { text = prefill; vm.consumeComposerPrefill() }
@@ -1362,9 +1477,50 @@ private fun ChatComposer(
     }
     Column(
         Modifier.fillMaxWidth().imePadding().background(HmBackground)
-            .onSizeChanged { onBarHeight(it.height) }
+            .onSizeChanged { onBarHeight(it.height); barHPx = it.height }
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
+        // vc52: "+" opens the official 6-row attach popup card above the composer
+        // (off-v50-attachmenu.png: Camera / Scan Document / Photo Library / Files /
+        // Drawing / Voice Message). RENDER-ONLY — rows dismiss the menu; pickers not wired.
+        if (attachMenu) {
+            androidx.compose.ui.window.Popup(
+                alignment = Alignment.BottomStart,
+                offset = androidx.compose.ui.unit.IntOffset(36, -(barHPx + 8)),
+                properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+            ) {
+                Column(
+                    Modifier
+                        .width(188.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xFF0C1A3C))
+                        .padding(vertical = 10.dp),
+                ) {
+                    val rows = listOf(
+                        androidx.compose.material.icons.outlined.PhotoCamera to "Camera",
+                        androidx.compose.material.icons.outlined.DocumentScanner to "Scan Document",
+                        androidx.compose.material.icons.outlined.PhotoLibrary to "Photo Library",
+                        androidx.compose.material.icons.outlined.Folder to "Files",
+                        androidx.compose.material.icons.outlined.Draw to "Drawing",
+                        androidx.compose.material.icons.outlined.GraphicEq to "Voice Message",
+                    )
+                    rows.forEach { (icon, label) ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { attachMenu = false }
+                                .padding(horizontal = 14.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(icon, contentDescription = label, tint = HmTextPrimary,
+                                modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.width(15.dp))
+                            Text(label, color = HmTextPrimary, fontSize = 16.sp)
+                        }
+                    }
+                }
+            }
+        }
         // queue bar (official: prompts sent while working collect here)
         if (queued.isNotEmpty()) {
             Column(Modifier.padding(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1428,7 +1584,8 @@ private fun ChatComposer(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(HmAccentCircle.copy(alpha = 0.55f)),
+                        .background(HmAccentCircle.copy(alpha = 0.55f))
+                        .clickable { attachMenu = !attachMenu }, // vc52
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Outlined.Add, contentDescription = "Add attachment",
@@ -1518,7 +1675,7 @@ private fun ChatComposer(
                             .clickable { /* voice capture: NOTES gap */ },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Filled.Mic, contentDescription = "Voice",
+                        Icon(Icons.Filled.Mic, contentDescription = "Record voice message",
                             tint = Color.White, modifier = Modifier.size(20.dp))
                     }
                 }
