@@ -188,7 +188,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onOpenGateways: () -> U
 }
 
 @Composable
-private fun SettingCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+internal fun SettingCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()

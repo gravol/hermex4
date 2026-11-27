@@ -798,7 +798,7 @@ private fun ComposeSheet(
         sheetState = sheetState,
     ) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-            .heightIn(min = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 120).dp)) {
+            .heightIn(min = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 160).dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Start a new session", color = HmTextPrimary, fontSize = 19.sp,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))

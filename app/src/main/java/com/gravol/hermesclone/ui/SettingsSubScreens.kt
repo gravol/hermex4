@@ -35,7 +35,7 @@ import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.Power
-import androidx.compose.material.icons.outlined.SettingsInput
+import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Window
@@ -456,7 +456,7 @@ internal fun SecuritySettingsScreen(onBack: () -> Unit) {
 @Composable
 internal fun AgentsScreen(vm: AppViewModel, onBack: () -> Unit) {
     val st by vm.state.collectAsStateWithLifecycle()
-    val profiles = st.profiles
+    val profiles = st.profiles.map { it.name }
     var selected by remember { mutableStateOf(0) }
     val selName = profiles.getOrElse(selected) { "Hermes" }
         .let { if (it.isBlank() || it == "default") "Hermes" else it }
@@ -495,7 +495,7 @@ internal fun AgentsScreen(vm: AppViewModel, onBack: () -> Unit) {
                 SettingDivider()
                 SettingRow(Icons.Outlined.Key, "Providers", null)
                 SettingDivider()
-                SettingRow(Icons.Outlined.SettingsInput, "Skills", null)
+                SettingRow(Icons.Outlined.School, "Skills", null)
             }
             SubSectionHeader("Integrations")
             SettingCard {

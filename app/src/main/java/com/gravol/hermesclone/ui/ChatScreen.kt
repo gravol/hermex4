@@ -62,9 +62,16 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.DocumentScanner
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Draw
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextLayoutResult
@@ -150,6 +157,8 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     val chat = st.chat
     var chatMore by remember { mutableStateOf(false) }
     var workspaceSheet by remember { mutableStateOf(false) } // vc52 Choose Workspace
+    var attachMenu by remember { mutableStateOf(false) } // vc52 attach popup (hoisted:
+    // the outside-tap catcher must sit at screen level, the popup itself in the composer)
     val clipboard = LocalClipboardManager.current
     BackHandler { vm.closeChat(); onBack() }
     BackHandler(enabled = workspaceSheet) { workspaceSheet = false } // vc52
@@ -299,6 +308,8 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                 queued = chat.queued,
                 spinner = chat.spinner,
                 prefill = chat.composerPrefill,
+                attachMenu = attachMenu,
+                onAttachMenu = { attachMenu = it },
             )
         },
         containerColor = HmBackground,
@@ -451,6 +462,13 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     }
 
     if (st.modelSheet.open) ModelSheet(vm, st.modelSheet)
+    // vc52: outside-tap catcher for the attach popup (PopupProperties in this Compose
+    // version has no onDismissRequest). Registered after the Scaffold so it overlays
+    // the transcript; the popup window itself draws above it.
+    if (attachMenu) {
+        BackHandler { attachMenu = false }
+        Box(Modifier.fillMaxSize().clickable { attachMenu = false })
+    }
     if (chat.settingsSheet) SessionSettingsSheet(vm, st, chat, workspaceLabel)
     if (workspaceSheet) WorkspacePickerSheet(workspaceLabel, onDismiss = { workspaceSheet = false })
     if (chat.renameTarget) ChatRenameDialog(vm, chat.title)
@@ -554,7 +572,7 @@ private fun SessionSettingsSheet(vm: AppViewModel, st: UiState, chat: ChatState,
         dragHandle = { BottomSheetDefaults.DragHandle(color = HmTextMuted) },
     ) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 6.dp).padding(bottom = 28.dp)
-            .heightIn(min = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 120).dp)
+            .heightIn(min = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 160).dp)
             .verticalScroll(rememberScrollState())) {
             Text("Session Settings", color = HmTextPrimary, fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
@@ -691,7 +709,7 @@ private fun WorkspacePickerSheet(workspaceLabel: String, onDismiss: () -> Unit) 
         dragHandle = { BottomSheetDefaults.DragHandle(color = HmTextMuted) },
     ) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 6.dp).padding(bottom = 28.dp)
-            .heightIn(min = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 120).dp)
+            .heightIn(min = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 160).dp)
             .verticalScroll(rememberScrollState())) {
             Text("Choose Workspace", color = HmTextPrimary, fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth()
@@ -1459,11 +1477,11 @@ private fun ChatComposer(
     queued: List<QueuedPrompt>,
     spinner: String,
     prefill: String?,
+    attachMenu: Boolean = false,
+    onAttachMenu: (Boolean) -> Unit = {},
 ) {
     var text by remember { mutableStateOf("") }
-    var attachMenu by remember { mutableStateOf(false) } // vc52 render-only attach menu
     var barHPx by remember { mutableIntStateOf(0) }
-    BackHandler(enabled = attachMenu) { attachMenu = false }
     // Edit (queued or user pill) pushes text back into the composer
     LaunchedEffect(prefill) {
         if (!prefill.isNullOrEmpty()) { text = prefill; vm.consumeComposerPrefill() }
@@ -1487,7 +1505,6 @@ private fun ChatComposer(
             androidx.compose.ui.window.Popup(
                 alignment = Alignment.BottomStart,
                 offset = androidx.compose.ui.unit.IntOffset(36, -(barHPx + 8)),
-                properties = androidx.compose.ui.window.PopupProperties(focusable = true),
             ) {
                 Column(
                     Modifier
@@ -1497,19 +1514,19 @@ private fun ChatComposer(
                         .padding(vertical = 10.dp),
                 ) {
                     val rows = listOf(
-                        androidx.compose.material.icons.outlined.PhotoCamera to "Camera",
-                        androidx.compose.material.icons.outlined.DocumentScanner to "Scan Document",
-                        androidx.compose.material.icons.outlined.PhotoLibrary to "Photo Library",
-                        androidx.compose.material.icons.outlined.Folder to "Files",
-                        androidx.compose.material.icons.outlined.Draw to "Drawing",
-                        androidx.compose.material.icons.outlined.GraphicEq to "Voice Message",
+                        Icons.Outlined.PhotoCamera to "Camera",
+                        Icons.Outlined.DocumentScanner to "Scan Document",
+                        Icons.Outlined.PhotoLibrary to "Photo Library",
+                        Icons.Outlined.Folder to "Files",
+                        Icons.Outlined.Draw to "Drawing",
+                        Icons.Outlined.GraphicEq to "Voice Message",
                     )
                     rows.forEach { (icon, label) ->
                         Row(
                             Modifier.fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
-                                .clickable { attachMenu = false }
-                                .padding(horizontal = 14.dp, vertical = 11.dp),
+                                .clickable { onAttachMenu(false) }
+                                .padding(horizontal = 14.dp, vertical = 13.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(icon, contentDescription = label, tint = HmTextPrimary,
@@ -1585,7 +1602,7 @@ private fun ChatComposer(
                         .size(40.dp)
                         .clip(CircleShape)
                         .background(HmAccentCircle.copy(alpha = 0.55f))
-                        .clickable { attachMenu = !attachMenu }, // vc52
+                        .clickable { onAttachMenu(!attachMenu) }, // vc52
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Outlined.Add, contentDescription = "Add attachment",
