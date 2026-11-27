@@ -14,8 +14,8 @@ android {
         applicationId = "com.gravol.hermesclone"
         minSdk = 26
         targetSdk = 35
-        versionCode = 52
-        versionName = "0.5.5-buttons"
+        versionCode = 53
+        versionName = "0.5.6-scrollfix"
     }
 
 

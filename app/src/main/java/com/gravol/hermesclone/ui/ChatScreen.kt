@@ -171,7 +171,42 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     val listState = remember(chat.resyncTick) { androidx.compose.foundation.lazy.LazyListState() }
     var composerBarH by remember { mutableIntStateOf(0) }
     val streamLen = (chat.streaming?.content?.length ?: 0) + (chat.streaming?.reasoning?.length ?: 0)
-    val totalItems = chat.messages.size + if (chat.streaming != null) 1 else 0
+    // vc53 FIX (VERIFIED via burst capture 2026-11-27): the LazyColumn renders a FILTERED
+    // list (blank tool-only round-trips fold into the turn pill), but every scroll target
+    // below used chat.messages.size — an out-of-range index once any row is filtered.
+    // LazyListState.scrollToItem with an out-of-range index is a NO-OP, so on tool-heavy
+    // turns the view froze at the top of the streaming item with newest text below the
+    // fold ("auto scroll isn't working"). Hoist the same filter here and target the REAL
+    // rendered count.
+    val turnMap = remember(chat.messages) {
+        val map = HashMap<String, Triple<String, List<ToolCard>, Pair<Long, Long>?>>()
+        val msgs = chat.messages
+        var i = 0
+        while (i < msgs.size) {
+            if (msgs[i].role == "assistant") {
+                var j = i
+                while (j < msgs.size && msgs[j].role == "assistant") j++
+                val run = msgs.subList(i, j).toList()
+                val tools = run.flatMap { it.tools }
+                if (tools.isNotEmpty()) {
+                    val anchor = run.first { it.tools.isNotEmpty() }.key
+                    val stamps = run.mapNotNull { it.ts }.sorted()
+                    val span = if (stamps.size >= 2) stamps.first() to stamps.last() else null
+                    run.forEach { map[it.key] = Triple(anchor, tools, span) }
+                }
+                i = j
+            } else i++
+        }
+        map
+    }
+    // official folds tool-only/thinking-only round-trips into the turn summary —
+    // blank-content rows render NOTHING unless they carry the turn pill (VERIFIED
+    // vs official 2026-11-27: clone was showing bare "Thought" shells per round-trip)
+    val renderedMsgs = chat.messages.filter { m ->
+        m.role != "assistant" || m.content.isNotEmpty() || m.streaming ||
+            (turnMap[m.key]?.let { it.first == m.key && it.second.isNotEmpty() } == true)
+    }
+    val totalItems = renderedMsgs.size + if (chat.streaming != null) 1 else 0
     // Follow-the-stream intent. canScrollForward alone is wrong: the list GROWS before the
     // effect runs, so a freshly appended message reads as "user scrolled away" and freezes
     // follow forever (vc37 regression). Track user DRAGS instead; re-arm on reaching bottom.
@@ -186,7 +221,7 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     var didInitialScroll by remember(chat.shortId, chat.resyncTick) { mutableStateOf(false) }
     LaunchedEffect(chat.shortId, chat.resyncTick, chat.messages.size) {
         if (!didInitialScroll && chat.messages.isNotEmpty()) {
-            listState.scrollToItem(chat.messages.size - 1, 10_000_000)
+            listState.scrollToItem((renderedMsgs.size - 1).coerceAtLeast(0), 10_000_000)
             didInitialScroll = true
         }
     }
@@ -200,9 +235,23 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
         if (totalItems == 0) return@LaunchedEffect
         // layoutInfo is from the PREVIOUS layout pass: itemCount/lastVisible describe where the
         // user was BEFORE this delta arrived. "At bottom" = last item of the OLD list was visible.
+        // vc53 FIX: the streaming item can grow TALLER than the viewport (long thinking + tool
+        // cards). Its TOP is then visible while its BOTTOM is below the fold, so the old
+        // "lastVisible.index >= count-1" guard read a legitimate at-bottom view as
+        // "user scrolled away" and froze follow mid-turn — the exact "auto scroll isn't
+        // working" report (VERIFIED via SCROLLDBG: atBottom=false, canFwd=true, streaming
+        // item top visible). Use actual scroll position instead: bottom is within one
+        // viewport of the content end = follow.
         val info = listState.layoutInfo
         val lastVisible = info.visibleItemsInfo.lastOrNull()
-        val atBottom = lastVisible == null || lastVisible.index >= info.totalItemsCount - 1
+        val vpH = info.viewportEndOffset - info.viewportStartOffset
+        val atBottom = lastVisible == null || (
+            // bottom edge of the last visible item reaches the viewport bottom…
+            lastVisible.offset + lastVisible.size <= vpH + 64 &&
+            // …AND that item is within one row of the list end (a real scroll-up lands
+            // further away — follow stays paused there, drag back down and it resumes)
+            (info.totalItemsCount - 1) - lastVisible.index <= 1
+            )
         if (atBottom) {
             listState.scrollToItem(totalItems - 1, 10_000_000)
         }
@@ -215,7 +264,9 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
         if (composerBarH == 0) return@LaunchedEffect
         val info = listState.layoutInfo
         val last = info.visibleItemsInfo.lastOrNull()
-        if (last != null && last.index >= info.totalItemsCount - 1 && totalItems > 0) {
+        if (last != null && totalItems > 0 &&
+            last.offset + last.size <= (info.viewportEndOffset - info.viewportStartOffset) + 64 &&
+            (info.totalItemsCount - 1) - last.index <= 1) {
             listState.scrollToItem(totalItems - 1, 10_000_000)
         }
     }
@@ -374,35 +425,8 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                 // Official turn grouping (verified 2026-11-24): consecutive assistant
                 // rows between user rows are ONE turn; all their tool calls collapse
                 // into a single pill anchored at the first tool-bearing row.
-                // anchor key + tools + (firstTs, lastTs) of the assistant run
-                val turnMap = remember(chat.messages) {
-                    val map = HashMap<String, Triple<String, List<ToolCard>, Pair<Long, Long>?>>()
-                    val msgs = chat.messages
-                    var i = 0
-                    while (i < msgs.size) {
-                        if (msgs[i].role == "assistant") {
-                            var j = i
-                            while (j < msgs.size && msgs[j].role == "assistant") j++
-                            val run = msgs.subList(i, j).toList()
-                            val tools = run.flatMap { it.tools }
-                            if (tools.isNotEmpty()) {
-                                val anchor = run.first { it.tools.isNotEmpty() }.key
-                                val stamps = run.mapNotNull { it.ts }.sorted()
-                                val span = if (stamps.size >= 2) stamps.first() to stamps.last() else null
-                                run.forEach { map[it.key] = Triple(anchor, tools, span) }
-                            }
-                            i = j
-                        } else i++
-                    }
-                    map
-                }
-                // official folds tool-only/thinking-only round-trips into the turn summary —
-                // blank-content rows render NOTHING unless they carry the turn pill (VERIFIED
-                // vs official 2026-11-27: clone was showing bare "Thought" shells per round-trip)
-                val renderedMsgs = chat.messages.filter { m ->
-                    m.role != "assistant" || m.content.isNotEmpty() || m.streaming ||
-                        (turnMap[m.key]?.let { it.first == m.key && it.second.isNotEmpty() } == true)
-                }
+                // turnMap + renderedMsgs hoisted above the effects (vc53) so scroll
+                // targets use the REAL rendered count, not chat.messages.size.
                 val lastAssistantKey = chat.messages.lastOrNull { it.role == "assistant" }?.key
                 LazyColumn(
                     state = listState,
