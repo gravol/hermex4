@@ -29,6 +29,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -144,12 +147,39 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     BackHandler { vm.closeChat(); onBack() }
 
     val listState = rememberLazyListState()
-    val streamLen = chat.streaming?.content?.length ?: 0
+    val streamLen = (chat.streaming?.content?.length ?: 0) + (chat.streaming?.reasoning?.length ?: 0)
     val totalItems = chat.messages.size + if (chat.streaming != null) 1 else 0
+    // Follow-the-stream intent. canScrollForward alone is wrong: the list GROWS before the
+    // effect runs, so a freshly appended message reads as "user scrolled away" and freezes
+    // follow forever (vc37 regression). Track user DRAGS instead; re-arm on reaching bottom.
+    // Follow-the-stream: rememberViewportEndOffsetForLastItem reads the PREVIOUS layout pass
+    // (effects run before layout), so it tells us where the user actually was when the new
+    // delta arrived — at-bottom follows, scrolled-up stays put, dragging back resumes.
+    // (canScrollForward is wrong: the list grows before the effect runs, so a fresh message
+    // reads as scrolled-away and freezes follow — vc37 regression.)
+    // Chat open: land at the bottom once, unconditionally (the incremental follow guard below
+    // is correct but useless if the chat opened at the top — vc37/38 regression: initial
+    // bottom-scroll relied on racing the effect before first layout, which the emulator lost).
+    var didInitialScroll by remember(chat.shortId) { mutableStateOf(false) }
+    LaunchedEffect(chat.shortId, chat.messages.size) {
+        if (!didInitialScroll && chat.messages.isNotEmpty()) {
+            listState.scrollToItem(chat.messages.size - 1, 10_000_000)
+            didInitialScroll = true
+        }
+    }
     LaunchedEffect(chat.messages.size, streamLen) {
-        // align the BOTTOM of the last item with the viewport (long replies otherwise
-        // hide their action row under the composer)
-        if (totalItems > 0) listState.scrollToItem((totalItems - 1).coerceAtLeast(0), 10_000_000)
+        // layoutInfo here still reflects the PREVIOUS layout pass (effects run before layout),
+        // so it tells us where the user actually was when this delta arrived: last item
+        // visible = follow; scrolled away = stay put; drag back into view = resume.
+        if (totalItems == 0) return@LaunchedEffect
+        // layoutInfo is from the PREVIOUS layout pass: itemCount/lastVisible describe where the
+        // user was BEFORE this delta arrived. "At bottom" = last item of the OLD list was visible.
+        val info = listState.layoutInfo
+        val lastVisible = info.visibleItemsInfo.lastOrNull()
+        val atBottom = lastVisible == null || lastVisible.index >= info.totalItemsCount - 1
+        if (atBottom) {
+            listState.scrollToItem(totalItems - 1, 10_000_000)
+        }
     }
 
     val agentName = if (chat.profile.isBlank() || chat.profile == "default") "Hermes" else chat.profile
@@ -1022,24 +1052,49 @@ private fun MessageRow(
         // vc49: thoughts render inline under a collapsible "Thought" heading (gray),
         // not a separate card (shot official49-chat-scroll2.png). Default collapsed.
         if (showThinking && msg.reasoning.isNotBlank()) {
-            var open by remember(msg.key) { mutableStateOf(false) }
-            Row(
-                Modifier.clip(RoundedCornerShape(8.dp))
-                    .clickable { open = !open }
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            // Official behavior (Jeff 2026-11-27): while streaming, the thought is OPEN by
+            // default, capped to ~4 lines, and auto-scrolls internally as reasoning arrives;
+            // tap ANYWHERE on the card to collapse; auto-collapses when the turn completes.
+            val thinking = msg.streaming
+            var open by remember(msg.key) { mutableStateOf(thinking) }
+            LaunchedEffect(thinking) { if (!thinking) open = false }
+            val thinkScroll = rememberScrollState()
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .clickable { open = !open },
             ) {
-                Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = null, tint = Color(0xFF8A8AA6), modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Thought", color = Color(0xFF8A8AA6), fontSize = 13.sp)
-            }
-            if (open) {
-                Text(
-                    msg.reasoning,
-                    color = Color(0xFF8A8AA6), fontSize = 12.sp, fontStyle = FontStyle.Italic,
-                    modifier = Modifier.padding(start = 20.dp, bottom = 4.dp),
-                )
+                Row(
+                    Modifier.padding(vertical = 4.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = null, tint = Color(0xFF8A8AA6), modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Thought", color = Color(0xFF8A8AA6), fontSize = 13.sp)
+                }
+                AnimatedVisibility(visible = open) {
+                    if (thinking) {
+                        Box(
+                            Modifier.heightIn(max = 78.dp)
+                                .padding(start = 20.dp, bottom = 4.dp)
+                                .verticalScroll(thinkScroll),
+                        ) {
+                            Text(
+                                msg.reasoning,
+                                color = Color(0xFF8A8AA6), fontSize = 12.sp, fontStyle = FontStyle.Italic,
+                            )
+                        }
+                        LaunchedEffect(msg.reasoning.length) {
+                            thinkScroll.animateScrollTo(10_000_000)
+                        }
+                    } else {
+                        Text(
+                            msg.reasoning,
+                            color = Color(0xFF8A8AA6), fontSize = 12.sp, fontStyle = FontStyle.Italic,
+                            modifier = Modifier.padding(start = 20.dp, bottom = 4.dp),
+                        )
+                    }
+                }
             }
         }
         if (showTools && (turnTools.isNotEmpty() || msg.tools.isNotEmpty())) {

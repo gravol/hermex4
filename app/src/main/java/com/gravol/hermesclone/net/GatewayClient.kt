@@ -324,6 +324,7 @@ class GatewayClient(rawBaseUrl: String) {
                     key = "h" + (firstString(el, "id") ?: System.nanoTime().toString()),
                     role = role,
                     content = content,
+                    reasoning = firstString(el, "reasoning") ?: firstString(el, "reasoning_content") ?: "",
                     tools = cards,
                     ts = ts?.toLong(),
                     rowId = rowId,
