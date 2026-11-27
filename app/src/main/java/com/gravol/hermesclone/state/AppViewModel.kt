@@ -1656,7 +1656,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 })
             }.onSuccess {
                 _state.update { st -> st.copy(chat = st.chat.copy(
-                    messages = st.chat.messages + ChatMsg("u${System.currentTimeMillis()}", "user", q.text),
+                    messages = st.chat.messages + ChatMsg("u${System.currentTimeMillis()}", "user", q.text,
+                        ts = System.currentTimeMillis() / 1000),
                 )) }
             }.onFailure { e ->
                 _state.update { st -> st.copy(chat = st.chat.copy(
@@ -1895,7 +1896,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "message.start" -> _state.update { st ->
                 val turn = (pl?.get("turn_id") as? JsonPrimitive)?.contentOrNull ?: "${System.nanoTime()}"
                 st.copy(chat = st.chat.copy(
-                    streaming = ChatMsg("s${turn}", "assistant", "", streaming = true),
+                    streaming = ChatMsg("s${turn}", "assistant", "", streaming = true,
+                        ts = System.currentTimeMillis() / 1000),
                     spinner = "", running = true, error = null,
                     workingSinceMs = System.currentTimeMillis(),
                 ))
@@ -1969,12 +1971,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         streaming = false,
                         content = finalText?.takeIf { it.isNotEmpty() } ?: s?.content ?: "",
                         usageLine = line,
+                        ts = System.currentTimeMillis() / 1000,
                     )
                     st.copy(chat = st.chat.copy(
                         streaming = null, spinner = "", running = false,
                         workingSinceMs = null,
                         messages = st.chat.messages + done,
                     ))
+                }
+                // Official behavior (VERIFIED 2026-11-27): after message.complete the
+                // official's transcript shows SERVER ROWS — each API round-trip as its own
+                // message (Thought line + tool summary + stamp), not our single merged
+                // streaming bubble. Refetch history a beat later (read path can lag briefly)
+                // and replace, bumping resyncTick so the view re-pins like a resync.
+                val settledLong = _state.value.chat.longId
+                if (settledLong.isNotBlank()) viewModelScope.launch {
+                    delay(1_500)
+                    if (_state.value.chat.longId == settledLong) {
+                        client?.messages(settledLong)?.onSuccess { msgs ->
+                            _state.update { st -> st.copy(chat = st.chat.copy(
+                                messages = msgs, resyncTick = st.chat.resyncTick + 1,
+                            )) }
+                        }
+                    }
                 }
                 // vc49: flush the client-side queue once the turn settles (official queue bar
                 // drains in order; VERIFIED live that a mid-turn submit is "redirected", so we

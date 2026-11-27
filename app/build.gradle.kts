@@ -14,8 +14,8 @@ android {
         applicationId = "com.gravol.hermesclone"
         minSdk = 26
         targetSdk = 35
-        versionCode = 45
-        versionName = "0.5.4.7-fiverow"
+        versionCode = 46
+        versionName = "0.5.4.8-granular"
     }
 
 
