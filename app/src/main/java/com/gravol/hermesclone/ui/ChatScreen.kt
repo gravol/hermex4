@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.layout.onSizeChanged
@@ -258,16 +259,85 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     }
 
     // Keyboard raise/lower resizes the transcript viewport but does NOT re-pin it: the newest
-    // text hides under the composer. Re-pin when the bar height changes IF the user was at
-    // the bottom in the pre-resize layout pass.
-    LaunchedEffect(composerBarH) {
-        if (composerBarH == 0) return@LaunchedEffect
-        val info = listState.layoutInfo
-        val last = info.visibleItemsInfo.lastOrNull()
-        if (last != null && totalItems > 0 &&
-            last.offset + last.size <= (info.viewportEndOffset - info.viewportStartOffset) + 64 &&
-            (info.totalItemsCount - 1) - last.index <= 1) {
-            listState.scrollToItem(totalItems - 1, 10_000_000)
+    // text hides under the composer. vc53 and earlier keyed this on composerBarH, which NEVER
+    // changes here — under adjustResize + edge-to-edge the WINDOW shrinks, the composer keeps
+    // its own height (imePadding resolves to 0), so the effect never fired (VERIFIED: zero
+    // pin logs on keyboard open). Re-pins on real viewport-height changes (debounced 200ms)
+    // when the user was at the bottom BEFORE the resize — user intent is carried ONLY by
+    // isScrollInProgress, because a viewport shrink re-anchors the LazyList to its TOP item
+    // and post-shrink distance math otherwise misreads an at-bottom view as scrolled away.
+    var wasAtBottom by remember { mutableStateOf(true) }
+    var lastVpH by remember { mutableIntStateOf(0) }
+    var lastResizeMs by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            // EVERY field inside the lambda: reading info afterwards races the repin's own
+            // layout (VERIFIED: post-hoc reads saw the post-repin state and misfollowed).
+            KbTrack(
+                vpH = info.viewportEndOffset - info.viewportStartOffset,
+                scrolling = listState.isScrollInProgress,
+                idx = last?.index ?: -1, off = last?.offset ?: 0, size = last?.size ?: 0,
+                ti = info.totalItemsCount,
+                firstOff = info.visibleItemsInfo.firstOrNull()?.offset ?: 0,
+                firstIdx = info.visibleItemsInfo.firstOrNull()?.index ?: 0,
+            )
+        }.collect { t ->
+            if (t.vpH <= 0 || t.idx < 0) return@collect
+            val idx = t.idx; val off = t.off; val size = t.size; val ti = t.ti; val vpH = t.vpH
+            // TRUE distance from content end: last visible item's bottom vs the bottom of the
+            // LAST item, computed from the first visible item's offset + its own offset (exact
+            // for rendered items; unrendered ones estimated by average). The old
+            // "(ti-1)-lastIdx <= 1" heuristic broke on items TALLER than the viewport: pinned
+            // at the bottom of a 1093px item, items below it are unrendered → lastIdx 7 of 10
+            // → read as scrolled-away (VERIFIED 19:29 traces).
+            val renderedSpan = if (idx > t.firstIdx)
+                (off - t.firstOff + size).toDouble() / (idx - t.firstIdx)
+            else size.toDouble()
+            val endDistance = ((ti - 1 - idx) * renderedSpan).toLong() - off - size + vpH
+            val nearEnd = endDistance <= 160L
+            val bottomEdgeVisible = off + size <= vpH + 64
+            // Sticky resize window: the IME animation produces many SMALL deltas after the
+            // first big one; per-frame >32 detection lets a late small frame fall through to
+            // "else -> false" and kill follow mid-animation (VERIFIED 19:34 trace).
+            val nowMs = System.currentTimeMillis()
+            val resizing = kotlin.math.abs(vpH - lastVpH) > 32 ||
+                (nowMs - lastResizeMs < 350 && vpH != lastVpH)
+            if (kotlin.math.abs(vpH - lastVpH) > 32) lastResizeMs = nowMs
+            wasAtBottom = when {
+                // User intent arrives ONLY through active drags — a viewport resize can never
+                // be a scroll, and after a shrink the LazyList re-anchors (keeps the TOP item
+                // fixed), so post-shrink distance math reads the old at-bottom view as far
+                // from the end (VERIFIED 19:34 trace: dist 4→1296→2166 during the IME anim).
+                t.scrolling -> nearEnd && (bottomEdgeVisible || endDistance <= 0)
+                resizing -> wasAtBottom  // keyboard resize: keep intent
+                nearEnd && bottomEdgeVisible -> true  // content growth keeps follow
+                nearEnd -> wasAtBottom  // tall streaming item: its bottom is below the fold
+                else -> false
+            }
+            lastVpH = vpH
+        }
+    }
+    LaunchedEffect(listState) {
+        var lastVp = -1
+        snapshotFlow {
+            val vp = listState.layoutInfo
+            vp.viewportEndOffset - vp.viewportStartOffset
+        }.collect { vp ->
+            if (vp == lastVp) return@collect
+            lastVp = vp
+            delay(200)  // let the IME animation settle
+            if (vp != lastVp) return@collect  // changed again during settle
+            if (!didInitialScroll) return@collect
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull() ?: return@collect
+            // No nearEnd gate here: it needs the same true-distance math as the tracker, and
+            // wasAtBottom already encodes "user was at the end" — repinning when at-bottom is
+            // a no-op if the view is already pinned.
+            if (wasAtBottom) {
+                listState.scrollToItem(info.totalItemsCount - 1, 10_000_000)
+            }
         }
     }
 
@@ -566,6 +636,14 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
         }
     }
 }
+
+// Snapshot of the LazyList layout for the keyboard re-pin tracker. Every field is captured
+// INSIDE the snapshotFlow lambda — reading layoutInfo afterwards races the re-pin's own layout.
+private data class KbTrack(
+    val vpH: Int, val scrolling: Boolean,
+    val idx: Int, val off: Int, val size: Int, val ti: Int,
+    val firstOff: Int, val firstIdx: Int,
+)
 
 @Composable
 private fun ChatMoreItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String,
