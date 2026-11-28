@@ -218,3 +218,31 @@ CONTRACT GAPS / LIMITS:
   deleted.
 - Queue bar, per-message branch anchor, user-message edit, "N selected": wire names NOT observed —
   implemented client-side as described above.
+
+## vc57 — / commands (0.5.8-slash, tag v0.5.8-slash, commit df2c938, 2026-11-28)
+OFFICIAL SEMANTICS — VERIFIED on official 1.0.0-54 (Pixel 8) + gateway DB/frame-trace:
+- Slash text NEVER reaches the gateway: /help /model /foobarbaz /history /new produced zero
+  sessions, zero message rows, zero prompt.submit/slash.exec/complete.slash-exec calls.
+  All intercepted CLIENT-side. (Previous attempts hurt by trying slash.exec — mobile has no
+  session:control capability — or letting /help reach the model.)
+- /help -> local user pill + category-grouped bullets (commands.catalog), skills bullets last.
+- /model -> monospace card "Current model: <model> (<provider-slug-before-colon>)".
+- /history -> card "Conversation History" + box-drawing rule + [You #n]/[Hermes #n] REAL rows only.
+- /new -> clears the local transcript view (no server session, no pill).
+- unknown -> card "Unknown command /x — nothing was sent.\nType /help for the full list."
+- Autocomplete popup: "/" browse ("N matches"), fuzzy query, rows = kind icon + blue /name +
+  gray desc + outlined category badge (SESSION/CONFIGURATION/SKILLS). complete.slash RPC verbatim.
+- Output rows = in-memory per-session overlay (slashOverlays map in AppViewModel): survive
+  back-nav + reopen (merged onto server history), die on app kill. Never in server history
+  or /history.
+- Path-like tokens (/model/foo) are NOT commands -> sent as normal messages (desktop ^-anchored
+  single-segment rule).
+- Official popup catcher SWALLOWS the send tap while open (infinite accept loop observed).
+  Clone deliberately uses the desktop whitespace-delta rule instead (accept only if the token
+  actually changes; else submit).
+GAPS (v2 candidates):
+- Unimplemented catalog commands (/stop /retry /title /save /compact ...) fall to the official
+  unknown card; official maps many to client actions we have not wired.
+- Bare "/" browse count differs (clone 140 vs official 216) — official likely calls
+  complete.slash with different params (session/profile) or merges catalog entries.
+- /help skills-section header text in official not pinned (clone renders "Skills").
