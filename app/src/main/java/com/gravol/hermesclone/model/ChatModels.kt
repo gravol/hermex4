@@ -72,6 +72,10 @@ data class ChatMsg(
     val rowId: Long? = null,
     /** reactions persisted on the row (display_metadata.reactions) */
     val reactions: List<Reaction> = emptyList(),
+    /** vc57: client-side slash-command row (official parity — VERIFIED 2026-11-28 the
+     *  official app never sends slash text to the gateway; pills+output are local and
+     *  survive reopen but die on app kill, so they live in the VM's per-session overlay). */
+    val local: Boolean = false,
 )
 
 /** A clarify question (VERIFIED capture tour3: {qid, question, choices|null, multi_select}). */

@@ -27,6 +27,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyItemScope
@@ -1591,6 +1594,65 @@ private fun ChatComposer(
 ) {
     var text by remember { mutableStateOf("") }
     var barHPx by remember { mutableIntStateOf(0) }
+    var barWPx by remember { mutableIntStateOf(0) }
+    // ---- vc57 slash autocomplete (official parity: VERIFIED on official 1.0.0-54 —
+    // "N matches" card floats above the composer; rows = icon, blue /name, gray desc,
+    // category badge; data is the complete.slash RPC verbatim) ----
+    var slashItems by remember { mutableStateOf<List<com.gravol.hermesclone.util.SlashItem>>(emptyList()) }
+    var slashReplaceFrom by remember { mutableIntStateOf(0) }
+    var slashDismissed by remember { mutableStateOf(false) }
+    // the "/" token under edit = first whitespace-delimited segment (position-0 command mode)
+    val slashToken = text.takeWhile { !it.isWhitespace() }
+    val slashOpen = !slashDismissed && slashToken.startsWith("/") && slashToken.length >= 1 &&
+        slashItems.isNotEmpty() && enabled
+    LaunchedEffect(text) {
+        slashDismissed = false
+        if (!slashToken.startsWith("/")) { slashItems = emptyList(); return@LaunchedEffect }
+        delay(180) // official popup lands a beat after typing — debounce keeps WS quiet
+        if (text.takeWhile { !it.isWhitespace() } != slashToken) return@LaunchedEffect
+        vm.warmSlashCatalog()
+        val (items, rf) = vm.slashCompletions(slashToken)
+        if (text.takeWhile { !it.isWhitespace() } == slashToken) {
+            slashItems = items
+            slashReplaceFrom = rf ?: slashToken.length
+        }
+    }
+    // vc52 popup lesson: PopupProperties has no onDismissRequest in this Compose —
+    // back + outside-tap catcher close it, and the dismissed flag resets on next text change.
+    if (slashOpen) {
+        BackHandler { slashDismissed = true }
+        androidx.compose.ui.window.Popup(alignment = Alignment.TopStart) {
+            Box(Modifier.fillMaxSize().clickable { slashDismissed = true })
+        }
+    }
+    // replace-from semantics mirror desktop slash-input.ts applyCompletion
+    fun applyCompletionTo(value: String, item: com.gravol.hermesclone.util.SlashItem): String {
+        val rf = slashReplaceFrom.coerceIn(0, value.length)
+        val row = if (rf > 0 && value[rf - 1] == '/' && item.text.startsWith("/"))
+            item.text.drop(1) else item.text
+        return value.substring(0, rf) + row
+    }
+    fun acceptSlash(item: com.gravol.hermesclone.util.SlashItem) {
+        text = applyCompletionTo(text, item); slashDismissed = true
+    }
+    fun submitCurrent() {
+        val t = text.trim()
+        if (t.isEmpty()) return
+        if (slashOpen) {
+            val top = slashItems.first()
+            val next = applyCompletionTo(text, top)
+            // Desktop whitespace-delta rule (slash-input.ts): accept only when the
+            // completion actually changes the token, else fall through to submit.
+            // VERIFIED 2026-11-28: the official mobile app swallows send forever while
+            // its popup is open (infinite accept loop) — we deliberately avoid that trap.
+            if (next != text && next.trimEnd() != text.trimEnd()) {
+                text = next; slashDismissed = true; return
+            }
+        }
+        vm.sendPrompt(t)
+        text = ""
+        slashItems = emptyList()
+    }
     // Edit (queued or user pill) pushes text back into the composer
     LaunchedEffect(prefill) {
         if (!prefill.isNullOrEmpty()) { text = prefill; vm.consumeComposerPrefill() }
@@ -1638,7 +1700,7 @@ private fun ChatComposer(
     }
     Column(
         Modifier.fillMaxWidth().imePadding().background(HmBackground)
-            .onSizeChanged { onBarHeight(it.height); barHPx = it.height }
+            .onSizeChanged { onBarHeight(it.height); barHPx = it.height; barWPx = it.width }
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         // vc52: "+" opens the official 6-row attach popup card above the composer
@@ -1676,6 +1738,65 @@ private fun ChatComposer(
                                 modifier = Modifier.size(22.dp))
                             Spacer(Modifier.width(15.dp))
                             Text(label, color = HmTextPrimary, fontSize = 16.sp)
+                        }
+                    }
+                }
+            }
+        }
+        // vc57: slash popup card floats above the composer (off-hel-popup/off-bare-slash2:
+        // "N matches" header right-aligned, rows = ⚡/⌘ icon, blue /name, gray one-line
+        // description, outlined category badge). Full composer width, ~8 rows visible.
+        if (slashOpen) {
+            androidx.compose.ui.window.Popup(
+                alignment = Alignment.BottomStart,
+                offset = androidx.compose.ui.unit.IntOffset(26, -(barHPx + 8)),
+            ) {
+                val screenW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+                Column(
+                    Modifier
+                        .width(screenW - 68.dp)  // official card: ~34dp margins each side
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(HmSurface)
+                        .padding(top = 10.dp, bottom = 6.dp),
+                ) {
+                    Text("${slashItems.size} matches", color = HmTextMuted, fontSize = 12.sp,
+                        textAlign = TextAlign.End, modifier = Modifier.fillMaxWidth().padding(end = 14.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Column(Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
+                        slashItems.forEach { item ->
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { acceptSlash(item) }
+                                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    if (item.kind == "skill") Icons.Outlined.Bolt else Icons.Outlined.Tune,
+                                    contentDescription = null, tint = HmTextMuted,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(item.text, color = HmLiveBlue, fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Clip)
+                                Spacer(Modifier.width(10.dp))
+                                Text(item.meta, color = HmTextMuted, fontSize = 13.sp, maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f))
+                                val badge = vm.slashCategoryBadge(item.text)
+                                    ?: if (item.kind == "skill") "SKILLS" else null
+                                if (badge != null) {
+                                    Spacer(Modifier.width(8.dp))
+                                    Box(
+                                        Modifier.clip(RoundedCornerShape(8.dp))
+                                            .border(1.dp, Color(0xFF3A3F5E))
+                                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                                    ) {
+                                        Text(badge, color = HmTextMuted, fontSize = 10.sp)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1778,10 +1899,7 @@ private fun ChatComposer(
                         else androidx.compose.ui.text.input.ImeAction.Default,
                     ),
                     keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                        onSend = {
-                            val t = text.trim()
-                            if (t.isNotEmpty()) { vm.sendPrompt(t); text = "" }
-                        },
+                        onSend = { submitCurrent() },
                     ),
                     singleLine = running,
                     modifier = Modifier
@@ -1821,11 +1939,7 @@ private fun ChatComposer(
                             .background(HmLiveBlue)
                             .alpha(if (enabled) 1f else 0.55f)
                             .clickable {
-                                val t = text.trim()
-                                if (t.isNotEmpty() && enabled) {
-                                    vm.sendPrompt(t)
-                                    text = ""
-                                }
+                                if (enabled) submitCurrent()
                             },
                         contentAlignment = Alignment.Center,
                     ) {

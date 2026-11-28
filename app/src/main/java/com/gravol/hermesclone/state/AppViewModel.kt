@@ -81,6 +81,8 @@ data class ChatState(
     val profile: String = "",
     val title: String = "",
     val model: String? = null,
+    /** session.resume info.provider — /model command display (VERIFIED: resume info carries it) */
+    val provider: String? = null,
     val loading: Boolean = false,
     val messages: List<ChatMsg> = emptyList(),
     val streaming: ChatMsg? = null,
@@ -699,7 +701,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     c.messages(reSync.longId)
                         .onSuccess { msgs ->
                             android.util.Log.d("HMWATCH", "resync: fetch1 ok n=${msgs.size} last=${msgs.lastOrNull()?.content?.take(30)}")
-                            _state.update { st -> st.copy(chat = st.chat.copy(messages = msgs, resyncTick = st.chat.resyncTick + 1)) }
+                            _state.update { st -> st.copy(chat = st.chat.copy(messages = withSlashOverlay(msgs, reSync.longId), resyncTick = st.chat.resyncTick + 1)) }
                         }
                         .onFailure { e ->
                             android.util.Log.d("HMWATCH", "resync: fetch1 FAIL ${e.message}")
@@ -712,7 +714,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             c.messages(reSync.longId)
                                 .onSuccess { msgs ->
                                     android.util.Log.d("HMWATCH", "resync: fetch2 ok n=${msgs.size} last=${msgs.lastOrNull()?.content?.take(30)}")
-                                    _state.update { st -> st.copy(chat = st.chat.copy(messages = msgs, resyncTick = st.chat.resyncTick + 1)) }
+                                    _state.update { st -> st.copy(chat = st.chat.copy(messages = withSlashOverlay(msgs, reSync.longId), resyncTick = st.chat.resyncTick + 1)) }
                                 }
                                 .onFailure { e ->
                                     android.util.Log.d("HMWATCH", "resync: fetch2 FAIL ${e.message}")
@@ -1506,7 +1508,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val c = client ?: return
         viewModelScope.launch {
             c.messages(row.id).onSuccess { msgs ->
-                _state.update { st -> st.copy(chat = st.chat.copy(messages = msgs, loading = false)) }
+                _state.update { st -> st.copy(chat = st.chat.copy(
+                    messages = withSlashOverlay(msgs, row.id), loading = false)) }
             }.onFailure { e ->
                 // a brand-new session has no persisted history yet -> 404 is normal, not an error
                 val is404 = e.message?.contains("404") == true
@@ -1535,6 +1538,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { st -> st.copy(chat = st.chat.copy(
                     shortId = short ?: st.chat.shortId,
                     model = (info?.get("model") as? JsonPrimitive)?.contentOrNull ?: st.chat.model,
+                    provider = (info?.get("provider") as? JsonPrimitive)?.contentOrNull ?: st.chat.provider,
                     title = (info?.get("title") as? JsonPrimitive)?.contentOrNull ?: st.chat.title,
                     currentCwd = (info?.get("cwd") as? JsonPrimitive)?.contentOrNull ?: st.chat.currentCwd,
                     // re-opened onto a live turn: elapsed base starts now (true turn start not
@@ -1568,6 +1572,91 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun closeChat() = _state.update { it.copy(chat = ChatState()) }
 
+    // ---- vc57 slash commands (official parity, VERIFIED 2026-11-28 on official 1.0.0-54) ----
+    // Slash text NEVER reaches prompt.submit: the official app intercepts it locally and
+    // renders pills/output itself. Output rows live in a per-session in-memory overlay —
+    // they survive back-nav/reopen (merged back onto server history) but die on app kill,
+    // exactly like the official.
+
+    /** longId -> ephemeral slash rows for the current process lifetime */
+    private val slashOverlays = HashMap<String, List<ChatMsg>>()
+
+    private fun withSlashOverlay(msgs: List<ChatMsg>, longId: String): List<ChatMsg> =
+        msgs + (slashOverlays[longId] ?: emptyList())
+
+    /** commands.catalog cache (popup badges + /help). Cleared on disconnect via ws=null. */
+    private var slashCatalog: com.gravol.hermesclone.util.SlashCatalog? = null
+
+    private suspend fun ensureSlashCatalog(profile: String): com.gravol.hermesclone.util.SlashCatalog? {
+        slashCatalog?.let { return it }
+        val w = ws ?: return null
+        val res = runCatching {
+            w.rpc("commands.catalog", buildJsonObject {
+                if (profile.isNotBlank()) put("profile", profile)
+            }) as? JsonObject
+        }.getOrNull()
+        return com.gravol.hermesclone.util.SlashCommands.parseCatalog(res)
+            .also { slashCatalog = it }
+    }
+
+    /** complete.slash for the composer popup (VERIFIED server: {items:[{text,display,meta,kind}],
+     *  replace_from}); session_id scopes project skills, profile scopes a session-less draft. */
+    suspend fun slashCompletions(text: String): Pair<List<com.gravol.hermesclone.util.SlashItem>, Int?> {
+        val w = ws ?: return emptyList<com.gravol.hermesclone.util.SlashItem>() to null
+        val chat = _state.value.chat
+        val res = runCatching {
+            w.rpc("complete.slash", buildJsonObject {
+                put("text", text)
+                chat.shortId?.let { put("session_id", it) }
+                if (chat.profile.isNotBlank()) put("profile", chat.profile)
+            }) as? JsonObject
+        }.getOrNull()
+        return com.gravol.hermesclone.util.SlashCommands.parseCompletions(res)
+    }
+
+    fun slashCategoryBadge(name: String): String? =
+        slashCatalog?.commandCategories?.get("/${name.lowercase()}")?.uppercase()
+
+    /** Official /help layout puts skills under their own header; make sure the catalog is
+     *  warm for popup badges without blocking the popup itself. */
+    fun warmSlashCatalog() {
+        if (slashCatalog != null) return
+        viewModelScope.launch { ensureSlashCatalog(_state.value.chat.profile) }
+    }
+
+    private fun handleSlash(text: String, name: String) {
+        val chat = _state.value.chat
+        val uid = System.currentTimeMillis()
+        val agentName = if (chat.profile.isBlank() || chat.profile == "default") "Hermes" else chat.profile
+        fun appendRows(vararg rows: ChatMsg) {
+            _state.update { st ->
+                val msgs = st.chat.messages + rows.toList()
+                slashOverlays[st.chat.longId] = msgs.filter { it.local }
+                st.copy(chat = st.chat.copy(messages = msgs))
+            }
+        }
+        fun pill() = ChatMsg("sl-u$uid", "user", text, ts = System.currentTimeMillis() / 1000, local = true)
+        fun out(body: String) = ChatMsg("sl-a$uid", "assistant", body, ts = System.currentTimeMillis() / 1000, local = true)
+        when (name) {
+            // VERIFIED: clears the local transcript view; NO server session created, no pill
+            "new" -> {
+                slashOverlays[chat.longId] = emptyList()
+                _state.update { st -> st.copy(chat = st.chat.copy(messages = emptyList(), streaming = null)) }
+            }
+            "model" -> appendRows(pill(), out(com.gravol.hermesclone.util.SlashCommands.modelMarkdown(chat.model, chat.provider)))
+            "history" -> appendRows(pill(), out(com.gravol.hermesclone.util.SlashCommands.historyMarkdown(chat.messages, agentName)))
+            "help" -> viewModelScope.launch {
+                val cat = ensureSlashCatalog(chat.profile)
+                appendRows(pill(), out(if (cat != null)
+                    com.gravol.hermesclone.util.SlashCommands.helpMarkdown(cat)
+                else "```\nCommand catalog unavailable.\n```"))
+            }
+            // v1: every other catalog command (official maps them to client actions we
+            // have not ported yet) falls to the official unknown card. Gap tracked in NOTES.
+            else -> appendRows(pill(), out(com.gravol.hermesclone.util.SlashCommands.unknownMarkdown(name)))
+        }
+    }
+
     /** prompt.submit — VERIFIED capture: session_id is the SHORT live id, surface "hermes-android".
      *  vc49 queue (VERIFIED live 2026-11-26): while a turn runs the official does NOT submit —
      *  a direct prompt.submit mid-turn returns {status:"redirected"} — it collects the prompt in
@@ -1578,6 +1667,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         truncateBeforeRowId: Long? = null,
         rebindIds: List<Long> = emptyList(),
     ) {
+        if (text.isBlank()) return
+        // vc57 (VERIFIED official 1.0.0-54): slash text is intercepted client-side BEFORE
+        // any session/ws gating — /help ran in the new-chat hero with no session at all.
+        com.gravol.hermesclone.util.SlashCommands.commandName(text)?.let { name ->
+            handleSlash(text.trim(), name)
+            return
+        }
         val chat = _state.value.chat
         val w = ws ?: return
         val short = chat.shortId ?: run {
