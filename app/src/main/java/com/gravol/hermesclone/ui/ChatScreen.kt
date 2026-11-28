@@ -35,6 +35,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -169,7 +170,7 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     // unscrollable (VERIFIED 2026-11-27) — so on resyncTick we build a brand-new state and
     // the unconditional initial bottom-scroll below re-arms and lands us at the newest turn.
     // (Always the same remember branch — a conditional remember would crash on recompose.)
-    val listState = remember(chat.resyncTick) { androidx.compose.foundation.lazy.LazyListState() }
+        val listState = remember(chat.resyncTick) { androidx.compose.foundation.lazy.LazyListState() }
     var composerBarH by remember { mutableIntStateOf(0) }
     val streamLen = (chat.streaming?.content?.length ?: 0) + (chat.streaming?.reasoning?.length ?: 0)
     // vc53 FIX (VERIFIED via burst capture 2026-11-27): the LazyColumn renders a FILTERED
@@ -226,38 +227,6 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
             didInitialScroll = true
         }
     }
-    // lastKey in the key set: a resync can REPLACE the list with the SAME size (window
-    // slides: oldest item out, newest in) — size-only keys miss that, the LazyColumn keeps
-    // the old index and the view freezes mid-list (VERIFIED via resync logging 2026-11-27).
-    LaunchedEffect(chat.messages.size, streamLen, chat.messages.lastOrNull()?.key) {
-        // layoutInfo here still reflects the PREVIOUS layout pass (effects run before layout),
-        // so it tells us where the user actually was when this delta arrived: last item
-        // visible = follow; scrolled away = stay put; drag back into view = resume.
-        if (totalItems == 0) return@LaunchedEffect
-        // layoutInfo is from the PREVIOUS layout pass: itemCount/lastVisible describe where the
-        // user was BEFORE this delta arrived. "At bottom" = last item of the OLD list was visible.
-        // vc53 FIX: the streaming item can grow TALLER than the viewport (long thinking + tool
-        // cards). Its TOP is then visible while its BOTTOM is below the fold, so the old
-        // "lastVisible.index >= count-1" guard read a legitimate at-bottom view as
-        // "user scrolled away" and froze follow mid-turn — the exact "auto scroll isn't
-        // working" report (VERIFIED via SCROLLDBG: atBottom=false, canFwd=true, streaming
-        // item top visible). Use actual scroll position instead: bottom is within one
-        // viewport of the content end = follow.
-        val info = listState.layoutInfo
-        val lastVisible = info.visibleItemsInfo.lastOrNull()
-        val vpH = info.viewportEndOffset - info.viewportStartOffset
-        val atBottom = lastVisible == null || (
-            // bottom edge of the last visible item reaches the viewport bottom…
-            lastVisible.offset + lastVisible.size <= vpH + 64 &&
-            // …AND that item is within one row of the list end (a real scroll-up lands
-            // further away — follow stays paused there, drag back down and it resumes)
-            (info.totalItemsCount - 1) - lastVisible.index <= 1
-            )
-        if (atBottom) {
-            listState.scrollToItem(totalItems - 1, 10_000_000)
-        }
-    }
-
     // Keyboard raise/lower resizes the transcript viewport but does NOT re-pin it: the newest
     // text hides under the composer. vc53 and earlier keyed this on composerBarH, which NEVER
     // changes here — under adjustResize + edge-to-edge the WINDOW shrinks, the composer keeps
@@ -268,7 +237,6 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
     // and post-shrink distance math otherwise misreads an at-bottom view as scrolled away.
     var wasAtBottom by remember { mutableStateOf(true) }
     var lastVpH by remember { mutableIntStateOf(0) }
-    var lastResizeMs by remember { mutableLongStateOf(0L) }
     LaunchedEffect(listState) {
         snapshotFlow {
             val info = listState.layoutInfo
@@ -298,24 +266,22 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
             val endDistance = ((ti - 1 - idx) * renderedSpan).toLong() - off - size + vpH
             val nearEnd = endDistance <= 160L
             val bottomEdgeVisible = off + size <= vpH + 64
-            // Sticky resize window: the IME animation produces many SMALL deltas after the
-            // first big one; per-frame >32 detection lets a late small frame fall through to
-            // "else -> false" and kill follow mid-animation (VERIFIED 19:34 trace).
-            val nowMs = System.currentTimeMillis()
-            val resizing = kotlin.math.abs(vpH - lastVpH) > 32 ||
-                (nowMs - lastResizeMs < 350 && vpH != lastVpH)
-            if (kotlin.math.abs(vpH - lastVpH) > 32) lastResizeMs = nowMs
             wasAtBottom = when {
                 // User intent arrives ONLY through active drags — a viewport resize can never
                 // be a scroll, and after a shrink the LazyList re-anchors (keeps the TOP item
                 // fixed), so post-shrink distance math reads the old at-bottom view as far
                 // from the end (VERIFIED 19:34 trace: dist 4→1296→2166 during the IME anim).
+                // Content growth drift is ALSO not intent: a pinned LazyColumn keeps its FIRST
+                // visible item fixed, so a growing streaming row pushes the bottom edge above
+                // the fold and every edge-based re-check flips a genuinely-at-bottom user to
+                // "scrolled away" — freezing follow from the first big burst (VERIFIED 20:10:
+                // stuck at the 'Ran 4 commands' pill with the whole essay below the fold).
+                // Verdict changes only on drags (where they landed) and is carried across
+                // resizes and growth; re-pin effects do the actual pinning.
                 t.scrolling -> nearEnd && (bottomEdgeVisible || endDistance <= 0)
-                resizing -> wasAtBottom  // keyboard resize: keep intent
-                nearEnd && bottomEdgeVisible -> true  // content growth keeps follow
-                nearEnd -> wasAtBottom  // tall streaming item: its bottom is below the fold
-                else -> false
+                else -> wasAtBottom
             }
+            android.util.Log.d("KBPIN", "track scr=${t.scrolling} idx=$idx off=$off size=$size ti=$ti vpH=$vpH dist=$endDistance atB=$wasAtBottom")
             lastVpH = vpH
         }
     }
@@ -335,9 +301,33 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
             // No nearEnd gate here: it needs the same true-distance math as the tracker, and
             // wasAtBottom already encodes "user was at the end" — repinning when at-bottom is
             // a no-op if the view is already pinned.
-            if (wasAtBottom) {
+            if (wasAtBottom && info.totalItemsCount > 0) {
                 listState.scrollToItem(info.totalItemsCount - 1, 10_000_000)
             }
+        }
+    }
+    // lastKey in the key set: a resync can REPLACE the list with the SAME size (window
+    // slides: oldest item out, newest in) — size-only keys miss that, the LazyColumn keeps
+    // the old index and the view freezes mid-list (VERIFIED via resync logging 2026-11-27).
+    LaunchedEffect(chat.messages.size, streamLen, chat.messages.lastOrNull()?.key) {
+        // vc55b: the follow effect RESTARTS on every stream delta (streamLen is a key), and
+        // deltas arrive every ~20ms — scrollToItem is a suspend scroll that gets cancelled by
+        // the next restart before it ever lands (VERIFIED: POST logs showed scrollVal stuck
+        // at 0@0 while ti=8, i.e. the list never moved despite scrollToItem firing constantly).
+        // Debounce: wait for a 60ms gap in deltas, then pin once.
+        delay(60)
+        val ti = listState.layoutInfo.totalItemsCount
+        if (ti == 0 || !wasAtBottom) return@LaunchedEffect
+        listState.scrollToItem(ti - 1, 10_000_000)
+        val li = listState.layoutInfo
+        val lv = li.visibleItemsInfo
+}
+    // Dragging back down to the bottom re-arms follow: pin immediately so the newest row is
+    // visible without waiting for the next stream delta.
+    LaunchedEffect(wasAtBottom) {
+        val ti = listState.layoutInfo.totalItemsCount
+        if (wasAtBottom && ti > 0 && !listState.isScrollInProgress) {
+            listState.scrollToItem(ti - 1, 10_000_000)
         }
     }
 
@@ -498,9 +488,18 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                 // turnMap + renderedMsgs hoisted above the effects (vc53) so scroll
                 // targets use the REAL rendered count, not chat.messages.size.
                 val lastAssistantKey = chat.messages.lastOrNull { it.role == "assistant" }?.key
+                // vc55c: THE gap bug. A viewport-tall LazyColumn anchors content to its TOP, so
+                // whenever the conversation is shorter than the screen the composer floats under
+                // hundreds of px of dead space (ROWH trace: content 918px < viewport 1882px —
+                // scrollToItem was a no-op, nothing to scroll; every "gap" screenshot was this).
+                // stackFromEnd doesn't exist on the LazyColumn overload that takes an explicit
+                // state in foundation 1.8.2 (verified against the AAR bytecode), so anchor the
+                // wrap-content list to the bottom of a weight(1f) Box instead — chat pinned near
+                // the composer; once content overflows the Box fills and scrolling behaves as before.
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
                         start = 12.dp, end = 12.dp, top = 8.dp, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -539,6 +538,7 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                         }
                     }
                 }
+                } // vc55c: end of bottom-anchor Box
             }
             // Phase 3: pending approval/clarify cards for THIS session, pinned above the composer
             val srqs = st.pendingSrqs.filter {
