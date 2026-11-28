@@ -101,6 +101,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -416,6 +417,11 @@ fun ChatScreen(vm: AppViewModel, onBack: () -> Unit) {
                 running = chat.running,
                 writing = !chat.streaming?.content.isNullOrEmpty(),
                 workingSinceMs = chat.workingSinceMs,
+                // clone-only tok/s (Jeff 2026-11-27): lengths sampled per-second for the rate
+                streamLens = Pair(
+                    chat.streaming?.reasoning?.length ?: 0,
+                    chat.streaming?.content?.length ?: 0,
+                ),
                 queued = chat.queued,
                 spinner = chat.spinner,
                 prefill = chat.composerPrefill,
@@ -1576,6 +1582,7 @@ private fun ChatComposer(
     running: Boolean,
     writing: Boolean,
     workingSinceMs: Long?,
+    streamLens: Pair<Int, Int> = 0 to 0,
     queued: List<QueuedPrompt>,
     spinner: String,
     prefill: String?,
@@ -1593,6 +1600,40 @@ private fun ChatComposer(
     LaunchedEffect(workingSinceMs) {
         if (workingSinceMs != null) {
             while (true) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1000) }
+        }
+    }
+    // clone-only tok/s readout (Jeff 2026-11-27): sample streaming reasoning/content lengths
+    // every 500ms, chars/4 → tok/s, EMA-smoothed (alpha 0.35) so bursts don't jitter.
+    // Phase = which channel grew most recently: purple "thinking" vs blue decode — matches
+    // the HermexV4 chip semantics. Hidden when nothing is flowing (tool-running gaps).
+    var tokPerSec by remember { mutableFloatStateOf(0f) }
+    var thinkPhase by remember { mutableStateOf(true) }
+    // streamLens is a plain param — the ticker must read the LATEST value, not the one
+    // captured at effect start: mirror it into state on every recomposition.
+    var lensR by remember { mutableIntStateOf(0) }
+    var lensC by remember { mutableIntStateOf(0) }
+    lensR = streamLens.first; lensC = streamLens.second
+    LaunchedEffect(running) {
+        if (!running) { tokPerSec = 0f; return@LaunchedEffect }
+        var lastR = lensR
+        var lastC = lensC
+        var first = true
+        while (true) {
+            delay(500)
+            val r = lensR; val c = lensC
+            if (!first) {
+                val dR = (r - lastR).coerceAtLeast(0)
+                val dC = (c - lastC).coerceAtLeast(0)
+                if (dR > 0 || dC > 0) {
+                    val inst = ((dR + dC) / 4f) * 2f
+                    tokPerSec = tokPerSec * 0.65f + inst * 0.35f
+                    thinkPhase = dR >= dC
+                } else {
+                    tokPerSec *= 0.6f // quiet (tool running / between phases): decay toward 0
+                }
+            }
+            first = false
+            lastR = r; lastC = c
         }
     }
     Column(
@@ -1686,6 +1727,13 @@ private fun ChatComposer(
                 Text(spinner.ifBlank { if (writing) "Writing" else "Thinking" }.take(120),
                     color = HmTextPrimary, fontSize = 13.sp)
                 Spacer(Modifier.weight(1f))
+                // clone-only tok/s chip: purple while reasoning flows, blue on decode
+                if (tokPerSec >= 1.5f) {
+                    Text("${tokPerSec.toInt()} tok/s",
+                        color = if (thinkPhase) HmPurple else HmLiveBlue,
+                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.width(10.dp))
+                }
                 Text(if (secs >= 60) "${secs / 60}m %02ds".format(secs % 60) else "${secs}s",
                     color = HmTextMuted, fontSize = 13.sp)
             }
